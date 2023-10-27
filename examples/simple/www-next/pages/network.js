@@ -249,7 +249,7 @@ function Network({}) {
 			onConfirm: async () =>  {
 				console.log('Restart');
 				try {
-					let r = await axios.get('api/action', {params: { action: 'restart'}})
+					let r = await axios.get('api/restart')
 				} catch (e) {
 					console.log(e);
 				}

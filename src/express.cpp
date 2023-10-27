@@ -95,31 +95,31 @@ void Express::do_pm_unlock()
 
 static esp_err_t express_post_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)req->user_ctx;
+    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
     return e->doRQ(req, &e->m_post);
 }
 
 static esp_err_t express_get_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)req->user_ctx;
+    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
     return e->doRQ(req, &e->m_get);
 }
 
 static esp_err_t express_delete_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)req->user_ctx;
+    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
     return e->doRQ(req, &e->m_delete);
 }
 
 static esp_err_t express_patch_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)req->user_ctx;
+    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
     return e->doRQ(req, &e->m_patch);
 }
 
 static esp_err_t express_put_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)req->user_ctx;
+    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
     return e->doRQ(req, &e->m_put);
 }
 
@@ -206,6 +206,11 @@ Express::Express()
         snprintf(resp_jsonb, 255, "{ \"free\": %d, \"reset\": %d }", esp_get_free_heap_size(), esp_reset_reason());
         req->json((const char*)resp_jsonb, strlen(resp_jsonb));
     });
+    get("api/restart", [](Express* c, ExRequest* req) {
+        req->json("{ \"ok\": true }");
+        reboot();
+    });
+
 #ifdef CONFIG_PM_PROFILING
     get("api/pm", [](Express* c, ExRequest* req) {
         char* buf = (char*)::calloc(HTTP_CHUNK_SIZE, sizeof(char));

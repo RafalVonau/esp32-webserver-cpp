@@ -67,6 +67,7 @@ void SETUP_task(void *parameter)
 	});
 	vTaskDelay(100);
 	e.start(80, 0, 1);
+	// e.start(80, 7, 1); // More speed
 	vTaskDelete(NULL); /* Delete SETUP task */
 }
 
