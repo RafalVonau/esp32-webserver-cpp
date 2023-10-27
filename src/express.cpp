@@ -300,7 +300,7 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m)
         i->second(this, &rq);
     } else {
         i = m_all.find(rq.uri());
-        if (i != m->end()) {
+        if (i != m_all.end()) {
             i->second(this, &rq);
         } else {
             httpd_resp_set_status(req, http_404_hdr);
