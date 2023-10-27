@@ -1,0 +1,131 @@
+#!/usr/bin/perl
+
+#
+# Generate data for www page.
+#
+# Author: Rafal Vonau <rafal.vonau@gmail.com>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 2 as
+# published by the Free Software Foundation.
+#
+	 
+
+$ENV{LANG}="C"; # ¶rodowisko w jêzyku angielskim
+$USE_GZIP=1;    # gzip files flag
+ # Dekoduj parametry wywo³ania
+
+$mkey="test";
+
+
+chdir("out");
+
+open (IN,"find * |");
+@src=<IN>;
+close IN; 
+
+foreach (@src) {
+ chop($_);
+}
+
+foreach (@src) {
+  $DATA="";
+  $ext=$_;
+  if (!($ext=~ /~/) && !($ext=~ /\.session/) && !($ext=~/\.svn/)) {
+    if (($USE_GZIP==1) && (($ext=~ /\.html/) || ($ext=~ /\.css/) || ($ext=~ /\.js/))) {
+      $FILES_GZIP{"$_"}=1;
+      open (IN,"cat $_ | gzip -9 |");
+    } else {
+      $FILES_GZIP{"$_"}=0;
+      open (IN,"$_");
+    }
+    $MIME{"$_"} = "0";
+    if ($ext=~ /\.html/) {$MIME{"$_"}="__html"; }
+    if ($ext=~ /\.css/) {$MIME{"$_"}="__css"; }
+    if ($ext=~ /\.js/) {$MIME{"$_"}="__js"; }
+    if ($ext=~ /\.svg/) {$MIME{"$_"}="__svg"; }
+    if ($ext=~ /\.jpg/) {$MIME{"$_"}="__jpg"; }
+    if ($ext=~ /\.jpeg/) {$MIME{"$_"}="__jpg"; }
+    if ($ext=~ /\.gif/) {$MIME{"$_"}="__gif"; }
+    if ($ext=~ /\.png/) {$MIME{"$_"}="__png"; }
+    if ($ext=~ /\.ico/) {$MIME{"$_"}="__ico"; }
+
+    @dst=<IN>;
+    close IN;
+    foreach (@dst) {
+     $DATA="$DATA$_";
+    }
+    $FILES_IN{"$_"}=$DATA;
+  }
+}
+
+
+open (OUTFILE,">../../main/www_fs.cpp");
+
+print OUTFILE "#include \"www_fs.h\"\n\n";
+
+while (($key, $value) = each(%FILES_IN)){
+  $key =~ s/\./_/g;
+  $key =~ s/\//_/g;
+  $key =~ s/\-/_/g;
+  print OUTFILE "const char ${mkey}_${key}[] = {\n";
+  @chars=split(//, $value);
+  $i=0;$j=0;
+  foreach (@chars) {
+    $j++;
+    $oo=sprintf("0x%x",ord($_));
+    print OUTFILE "$oo,";
+    if (++$i==0x10) {
+      print OUTFILE "\n";
+      $i=0;
+    }
+  }
+  $SIZE{"$key"}=$j;
+
+  print OUTFILE "};\n";
+}
+
+
+print OUTFILE "\n\nstatic const char *__html = \"text/html\";\n";
+print OUTFILE "static const char *__css = \"text/css\";\n";
+print OUTFILE "static const char *__js = \"text/javascript\";\n";
+print OUTFILE "static const char *__svg = \"image/svg+xml\";\n";
+print OUTFILE "static const char *__jpg = \"image/jpeg\";\n";
+print OUTFILE "static const char *__gif = \"image/gif\";\n";
+print OUTFILE "static const char *__png = \"image/png\";\n";
+print OUTFILE "static const char *__ico = \"image/x-icon\";\n";
+
+
+#@keys = sort { $FILES_IN{$a} cmp $FILES_IN{$b} } keys %FILES_IN;
+@keys = sort { $a cmp $b } keys %FILES_IN;
+
+print OUTFILE "\n\nstruct www_file_t www_filesystem[] = {\n";
+foreach (@keys) {
+  $key=$_;
+  $oldkey=$_;
+  $key =~ s/\./_/g;
+  $key =~ s/\//_/g;
+  $key =~ s/\-/_/g;
+  print OUTFILE "  {\"$oldkey\",$SIZE{$key},${mkey}_$key,$FILES_GZIP{$oldkey},$MIME{$oldkey}},\n";
+  if ($oldkey=~ /\.html/) {
+    $kkey=$oldkey;
+    $kkey =~ s/\.html//g;
+    print OUTFILE "  {\"$kkey\",$SIZE{$key},${mkey}_$key,$FILES_GZIP{$oldkey},$MIME{$oldkey}},\n";
+  }
+}
+print OUTFILE "  {\"\",0,0,0},\n";
+print OUTFILE "};\n\n";
+
+
+close OUTFILE;
+
+
+open (OUTFILE,">../../main/www_fs.h");
+print OUTFILE "#ifndef __WWW_FILESYSTEM_H\n";
+print OUTFILE "#define __WWW_FILESYSTEM_H\n\n";
+print OUTFILE "struct www_file_t {\n const char *name;\n int size;\n const char *data;\n int gz;\n const char* mime_type;\n};\n";
+print OUTFILE "extern struct www_file_t www_filesystem[];\n";
+print OUTFILE "\n\n";
+print OUTFILE "#endif\n\n";
+close OUTFILE;
+
