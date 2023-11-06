@@ -13,7 +13,7 @@ Configure WiFi SSID/PASSWORD in menuconfig or by manually editing sdkconfig.defa
 
 # Building under Linux
 * install PlatformIO
-* enter examples/basic directory
+* enter examples/simple directory
 * type in terminal:
   platformio run
   platformio upload
