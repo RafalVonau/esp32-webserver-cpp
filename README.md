@@ -15,8 +15,7 @@ Configure WiFi SSID/PASSWORD in menuconfig or by manually editing sdkconfig.defa
 * install PlatformIO
 * enter examples/simple directory
 * type in terminal:
-  platformio run
-  platformio upload
+  platformio run -t upload
 * type http://express.local/ or http://express.lan/ in the web browser.
 
 # Example page
