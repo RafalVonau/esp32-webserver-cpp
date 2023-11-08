@@ -46,6 +46,11 @@ void SETUP_task(void *parameter)
 	e.get("api/network", [](Express* c, ExRequest* req) {
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
 	});
+	e.get("api/log", [](Express* c, ExRequest* req) {
+		req->json("[ {\"s\":1696851532,\"ms\":810,\"p\":1,\"x\":\"main\",\"y\":\"main\",\"z\":\"START\"},"
+		"{\"s\":1696851532,\"ms\":960,\"p\":0,\"x\":\"\",\"y\":\"\",\"z\":\"HW: ESP32 \"} ]");
+	});
+
 
 	e.get("test", [](Express* c, ExRequest* req) {
 		req->json("{ \"test\": true }");
