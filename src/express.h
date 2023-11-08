@@ -97,10 +97,10 @@ public:
     ~ExRequest() {
         m_query.clear();
         m_cookie.clear();
-        if (m_url) free((void *)m_url);
-        if (m_cookie_mem) free((void *)m_cookie_mem);
-        if (m_param_mem) free((void *)m_param_mem);
-        if (m_key_mem) free((void *)m_key_mem);
+        if (m_url) ::free((void *)m_url);
+        if (m_cookie_mem) ::free((void *)m_cookie_mem);
+        if (m_param_mem) ::free((void *)m_param_mem);
+        if (m_key_mem) ::free((void *)m_key_mem);
     }
     const char* uri() const { return m_uri; }
 
@@ -154,6 +154,8 @@ public:
     esp_err_t gzip(const char* type, const char* resp, int len = 0);
     esp_err_t send(const char* type, const char* resp, int len);
     esp_err_t send_res(esp_err_t ret);
+    
+    esp_err_t redirect(const char *path, const char *type = "302 Found");
 
 private:
     void parseURI();

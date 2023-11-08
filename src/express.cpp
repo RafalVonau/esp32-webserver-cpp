@@ -302,9 +302,6 @@ void Express::start(int port, uint8_t pr, BaseType_t coreID)
     // for (i = m_get.begin(); i != m_get.end(); ++i) {
     //     msg_debug("GET <%s>", i->first);
     // }
-    // for (i = m_post.begin(); i != m_post.end(); ++i) {
-    //     msg_debug("POST <%s>", i->first);
-    // }
 
     msg_info("Starting server on port: '%d'", m_config.server_port);
     if (httpd_start(&m_server, &m_config) == ESP_OK) {
@@ -837,6 +834,16 @@ esp_err_t ExRequest::send(const char* type, const char* resp, int len)
     httpd_resp_set_type(m_req, type);
     httpd_resp_set_hdr(m_req, http_cache_control_hdr, http_cache_control_cache);
     return httpd_resp_send(m_req, (const char*)resp, len);
+}
+
+
+esp_err_t ExRequest::redirect(const char *path, const char *type)
+{
+    httpd_resp_set_type(m_req, http_content_type_html);
+    httpd_resp_set_status(m_req, type);
+    httpd_resp_set_hdr(m_req, "Location", path);
+    httpd_resp_send(m_req, NULL, 0);
+    return ESP_OK;
 }
 
 /*!
