@@ -11,9 +11,9 @@
 #
 	 
 
-$ENV{LANG}="C"; # ¶rodowisko w jêzyku angielskim
+$ENV{LANG}="C"; # ï¿½rodowisko w jï¿½zyku angielskim
 $USE_GZIP=1;    # gzip files flag
- # Dekoduj parametry wywo³ania
+ # Dekoduj parametry wywoï¿½ania
 
 $mkey="test";
 
@@ -123,7 +123,8 @@ close OUTFILE;
 open (OUTFILE,">../../main/www_fs.h");
 print OUTFILE "#ifndef __WWW_FILESYSTEM_H\n";
 print OUTFILE "#define __WWW_FILESYSTEM_H\n\n";
-print OUTFILE "struct www_file_t {\n const char *name;\n int size;\n const char *data;\n int gz;\n const char* mime_type;\n};\n";
+print OUTFILE "#include \"express.h\"\n\n";
+# print OUTFILE "struct www_file_t {\n const char *name;\n int size;\n const char *data;\n int gz;\n const char* mime_type;\n};\n";
 print OUTFILE "extern struct www_file_t www_filesystem[];\n";
 print OUTFILE "\n\n";
 print OUTFILE "#endif\n\n";

@@ -22,17 +22,61 @@
 #include <string>
 #include <list>
 
+struct www_file_t {
+    const char *name;
+    int size;
+    const char *data;
+    int gz;
+    const char* mime_type;
+};
+
+/*!
+ * \brief Compare string (const char*) implementation for std::map/std::multimap.
+ */
 class ExRequest_cmp_str {
 public:
     ExRequest_cmp_str() {}
-
     bool operator()(const char* str1, const char* str2) const {
-        if (str1 == str2)
-            return false; // same pointer so "not less"
-        else
-            return (strcmp(str1, str2) < 0); //string compare: str1<str2 ?
+        if (str1 == str2) return false; else return (strcmp(str1, str2) < 0);
     }
 };
+
+class Express;
+class ExRequest;
+class WSRequest;
+
+/*!
+ * \brief Page callback.
+ * \param c - pointer to Express class,
+ * \param req - pointer to request/response class.
+ */
+typedef std::function<void(Express* c, ExRequest* req)> ExpressPageCB;
+/*!
+ * \brief Middleware callback.
+ * \param c - pointer to Express class,
+ * \param req - pointer to request/response class.
+ * \return true - process next middleware or page, false - break processing.
+ */
+typedef std::function<bool(Express* c, ExRequest* req)> ExpressMidCB;
+/*!
+ * \brief WebSocket callback.
+ * \param c - pointer to Express class,
+ * \param req - pointer to WebSocket request/response class.
+ */
+typedef std::function<void(Express* c, WSRequest* req)> ExpressWSCB;
+/*!
+ * \brief WebSocket callback.
+ * \param c - pointer to Express class,
+ * \param req - pointer to WebSocket request/response class.
+ * \param arg - pointer to argument,
+ * \param arg_arg - argument length in bytes.
+ */
+typedef std::function<void(Express* c, WSRequest* req, char* arg, int arg_len)> ExpressWSON;
+
+typedef std::map<const char*, ExpressPageCB, ExRequest_cmp_str> ExpressPgMap;
+typedef std::list<std::pair<const char*, ExpressPageCB> > ExpressPgList;
+typedef std::list<std::pair<const char*, ExpressMidCB> > ExpressMidMap;
+
 
 /*!
  * \brief HTTP Request/Response.
@@ -43,13 +87,13 @@ public:
         m_url = strdup(rq->uri);
         m_uri = m_url;
         m_req = rq;
+        m_key = "";
         parseURI();
     }
 
     ~ExRequest() {
         free(m_url);
     }
-
     const char* uri() const { return m_uri; }
     const char* getArg(const char* key) {
         auto i = m_query.find(key);
@@ -66,6 +110,7 @@ public:
     }
     int argCount() const { return m_query.size(); }
 
+    void setKey(const char *key) { m_key = key; }
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
@@ -80,6 +125,7 @@ public:
     httpd_req_t* m_req;
     char* m_url;
     const char* m_uri;
+    const char* m_key;
     std::map<const char*, const char*, ExRequest_cmp_str> m_query;
 };
 
@@ -112,7 +158,7 @@ public:
 public:
     uint8_t           m_buf[WS_MAX_FRAME_SIZE];
     httpd_ws_frame_t  m_pkt;
-    httpd_req_t* m_req;
+    httpd_req_t      *m_req;
     httpd_handle_t    m_server;
 };
 
@@ -121,12 +167,6 @@ public:
 /*!
  * \brief HTTP Server.
  */
-class Express;
-
-typedef std::function<void(Express* c, ExRequest* req)> ExpressPageCB;
-typedef std::function<void(Express* c, WSRequest* req)> ExpressWSCB;
-typedef std::function<void(Express* c, WSRequest* req, char* arg, int arg_len)> ExpressWSON;
-typedef std::map<const char*, ExpressPageCB, ExRequest_cmp_str> ExpressPgMap;
 class Express {
 public:
     /*!
@@ -143,25 +183,54 @@ public:
      */
     void start(int port = 80, uint8_t pr = 0, BaseType_t coreID = tskNO_AFFINITY);
 
-    void get(const char* path, ExpressPageCB cb) { m_get.insert({ path, cb }); }
-    void post(const char* path, ExpressPageCB cb) { m_post.insert({ path, cb }); }
-    void del(const char* path, ExpressPageCB cb) { m_delete.insert({ path, cb }); }
-    void patch(const char* path, ExpressPageCB cb) { m_patch.insert({ path, cb }); }
-    void put(const char* path, ExpressPageCB cb) { m_put.insert({ path, cb }); }
-    void all(const char* path, ExpressPageCB cb) { m_all.insert({ path, cb }); }
+    /*!
+     * \brief Check for meta keys ( *, : ) in path.
+     */
+    bool hasMeta(const char *a) const;
+    /*!
+     * \brief Compare path (skip section if * or : characters are detected).
+     */
+    bool comparePath(const char *a, const char *b) const;
+
+    void get(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lget.push_back({ path, cb }); else m_get.insert({ path, cb }); }
+    void post(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lpost.push_back({ path, cb }); else m_post.insert({ path, cb }); }
+    void del(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_ldelete.push_back({ path, cb }); else m_delete.insert({ path, cb }); }
+    void patch(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lpatch.push_back({ path, cb }); else m_patch.insert({ path, cb }); }
+    void put(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lput.push_back({ path, cb }); else m_put.insert({ path, cb }); }
+    void all(const char* path, ExpressPageCB cb) { 
+        if (hasMeta(path)) {
+            /* put to std::list */
+            m_lget.push_back({ path, cb });
+            m_lpost.push_back({ path, cb });
+            m_ldelete.push_back({ path, cb });
+            m_lpatch.push_back({ path, cb });
+            m_lput.push_back({ path, cb });
+        } else {
+            /* put to std::map */
+            m_get.insert({ path, cb }); 
+            m_post.insert({ path, cb });
+            m_delete.insert({ path, cb }); 
+            m_patch.insert({ path, cb });
+            m_put.insert({ path, cb });
+        }
+    }
+    /* Middleware */
+    void use(const char* path, ExpressMidCB cb) { if (*path == '\0') m_midAll.push_back({ path, cb }); else m_mid.push_back({ path, cb }); }
+        
     /* Websocket events */
     void onWS(ExpressWSCB w) { m_wsCB = w; }
     void on(const char* what, ExpressWSON cb) { m_on.insert({ what, cb }); }
     void off(const char* what) { m_on.erase(what); }
 
+
     /*!
      * \brief Add static files.
      * \param arg - pointer to generated file table in the form [ { name, size, data, gz, mime_type }, ...]
      */
-    void addStatic(void*);
+    void addStatic(struct www_file_t *);
 
     /* Wrappers */
-    esp_err_t doRQ(httpd_req_t* req, ExpressPgMap* m);
+    esp_err_t doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l);
     esp_err_t doWS(WSRequest* req);
     /* OTA */
     esp_err_t ota_stop(uint32_t abort);
@@ -176,7 +245,9 @@ public:
     esp_pm_lock_handle_t   m_pm_cpu_lock;
     esp_pm_lock_handle_t   m_pm_sleep_lock;
 #endif
-    ExpressPgMap           m_get, m_post, m_delete, m_patch, m_put, m_all;
+    ExpressPgMap           m_get, m_post, m_delete, m_patch, m_put;
+    ExpressPgList          m_lget, m_lpost, m_ldelete, m_lpatch, m_lput;
+    ExpressMidMap          m_mid, m_midAll;
     httpd_handle_t         m_server;
     httpd_config_t         m_config;
     ExpressWSCB            m_wsCB;

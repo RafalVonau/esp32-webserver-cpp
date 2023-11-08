@@ -96,31 +96,31 @@ void Express::do_pm_unlock()
 static esp_err_t express_post_handler(httpd_req_t* req)
 {
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    return e->doRQ(req, &e->m_post);
+    return e->doRQ(req, &e->m_post, &e->m_lpost);
 }
 
 static esp_err_t express_get_handler(httpd_req_t* req)
 {
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    return e->doRQ(req, &e->m_get);
+    return e->doRQ(req, &e->m_get, &e->m_lget);
 }
 
 static esp_err_t express_delete_handler(httpd_req_t* req)
 {
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    return e->doRQ(req, &e->m_delete);
+    return e->doRQ(req, &e->m_delete, &e->m_ldelete);
 }
 
 static esp_err_t express_patch_handler(httpd_req_t* req)
 {
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    return e->doRQ(req, &e->m_patch);
+    return e->doRQ(req, &e->m_patch, &e->m_lpatch);
 }
 
 static esp_err_t express_put_handler(httpd_req_t* req)
 {
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    return e->doRQ(req, &e->m_put);
+    return e->doRQ(req, &e->m_put, &e->m_lput);
 }
 
 static esp_err_t express_ws_handler(httpd_req_t* req)
@@ -240,6 +240,42 @@ Express::~Express()
 }
 
 /*!
+ * \brief Check for meta keys ( *, : ) in path.
+ */
+bool Express::hasMeta(const char *a) const
+{
+    const char *ch = a;
+    while (*ch != '\0') {
+        /* Check for meta characters */
+        if ((*ch == '*') || (*ch == ':')) return true;
+        ch++;
+    }
+    return false;
+}
+
+/*!
+ * \brief Compare path (skip section if * or : characters are detected).
+ */
+bool Express::comparePath(const char *a, const char *b) const
+{
+    if (*a == '\0') return true;
+	while ((*a != '\0') && (*b != '\0')) {
+		if ((*a == '*') || (*a == ':')) {
+			/* Skip section */
+			while ((*a != '/') && (*a != '\0')) a++;
+			while ((*b != '/') && (*b != '\0')) b++;
+		}
+		if ((*a == '\0') || (*b == '\0')) break;
+		if (*a != *b) return false;		
+		a++;
+		b++;
+	}
+	if ((*a != '\0') || (*b != '\0')) return false;
+    return true;
+}
+
+
+/*!
  * \brief Start http server.
  * \param port - listening port,
  * \param pr - task priority,
@@ -289,46 +325,79 @@ const static char http_404_hdr[] = "404 Not Found";
 /*!
  * \brief Handle GET (HTML/CSS/JS/JSON code).
  */
-esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m)
+esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
 {
     ExRequest rq(req);
     esp_err_t ret = ESP_OK;
     do_pm_lock();
 
-    auto i = m->find(rq.uri());
-    if (i != m->end()) {
-        i->second(this, &rq);
-    } else {
-        i = m_all.find(rq.uri());
-        if (i != m_all.end()) {
+    /* Middleware - phase1 (mach to all pages) */
+    {
+        auto itr1 = m_midAll.cbegin();
+        while (itr1 != m_midAll.cend()) {
+            rq.setKey(itr1->first);
+            if (!itr1->second(this, &rq)) {
+                do_pm_unlock();
+                return ret;
+            }
+            itr1++;
+        }
+
+        /* Middleware - phase2 (selective match) */
+        itr1 = m_mid.cbegin();
+        while (itr1 != m_mid.cend()) {
+            if (comparePath(itr1->first, rq.uri())) {
+                rq.setKey(itr1->first);
+                if (!itr1->second(this, &rq)) {
+                    do_pm_unlock();
+                    return ret;
+                }
+            }
+            itr1++;
+        }    
+    }
+
+    /* Find page in map */
+    {
+        auto i = m->find(rq.uri());
+        if (i != m->end()) {
+            rq.setKey(i->first);
             i->second(this, &rq);
-        } else {
-            httpd_resp_set_status(req, http_404_hdr);
-            ret = httpd_resp_send(req, NULL, 0);
+            do_pm_unlock();
+            return ret;
         }
     }
 
+    /* Find page in list */
+    {
+        auto i = l->cbegin();
+        while (i != l->cend()) {
+            if (comparePath(i->first, rq.uri())) {
+                rq.setKey(i->first);
+                i->second(this, &rq);
+                do_pm_unlock();
+                return ret;
+            }
+            i++;
+        }
+    }
+
+    /* Not found */
+    httpd_resp_set_status(req, http_404_hdr);
+    ret = httpd_resp_send(req, NULL, 0);
+    
     do_pm_unlock();
     return ret;
 }
-
-
-struct www_file_t {
-    const char* name;
-    int size;
-    const char* data;
-    int gz;
-    const char* mime_type;
-};
 
 /*!
  * \brief Add static files.
  * 
  * \param arg - pointer to generated file table in the form [ { name, size, data, gz, mime_type }, ...]
  */
-void Express::addStatic(void* arg)
+void Express::addStatic(struct www_file_t *f)
 {
-    struct www_file_t* n, * f = (struct www_file_t*)arg;
+    struct www_file_t* n;
     int l, i = 0;
 
     l = strlen(f[i].name);
