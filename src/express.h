@@ -103,46 +103,43 @@ public:
         if (m_key_mem) free((void *)m_key_mem);
     }
     const char* uri() const { return m_uri; }
-    
-    /* Parameters from query */
+
+    void setKey(const char *key) { m_key = key; }
+
+    /* Parameters from query like /xxx?nr=0&val=3  (key = [nr, val])*/
     const char* getArg(const char* key) {
         auto i = m_query.find(key);
         if (i == m_query.end()) return NULL;
         return i->second;
     }
-    int getArgInt(const char* key, int df) {
-        int v;
+    int getArgInt(const char* key, int df = -1) {
+        int v = df;
         auto i = m_query.find(key);
         if (i == m_query.end()) return df;
         if (sscanf(i->second, "0x%x", &v) == 1) return v;
         if (sscanf(i->second, "%d", &v) == 1) return v;
         return df;
     }
-    int argCount() const { return m_query.size(); }
-
-    void setKey(const char *key) { m_key = key; }
     
     /* Parameters from cookie */
-    void parseCookie();
-    int cookieCount() const { return m_cookie.size(); }
     const char* getCookie(const char* key) {
+        if (!m_cookie_mem) parseCookie();
         auto i = m_cookie.find(key);
         if (i == m_cookie.end()) return NULL;
         return i->second;
     }
     void setCookie(const char* cookie);
     
-    /* Parameters from uri like /api/add/:id/:val (name will be id and val) */
-    void parseParams();
-    const char *paramString(const char *name) {
+    /* Parameters from uri like /api/add/:id/:val (name = [id, val]) */
+    const char *getParamString(const char *name) {
         if (!m_param_mem) parseParams();
         auto i = m_param.find(name);
         if (i == m_param.end()) return NULL;
         return i->second;
     }
-    int paramInt(const char *name, int defVal = -1) {
+    int getParamInt(const char *name, int defVal = -1) {
         int v = defVal;
-        const char *val = paramString(name);
+        const char *val = getParamString(name);
         if (val) {
             if (sscanf(val, "0x%x", &v) == 1) return v;
             if (sscanf(val, "%d", &v) == 1) return v;
@@ -160,6 +157,8 @@ public:
 
 private:
     void parseURI();
+    void parseParams();
+    void parseCookie();
 
 public:
     httpd_req_t* m_req;

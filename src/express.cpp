@@ -670,8 +670,6 @@ void ExRequest::parseURI()
     if ((key) && (value)) {
         /* process key/value */
         m_query.insert({ key, value });
-        // if (strcmp(key,"nr") == 0) { sscanf(value, "%u", nr); }
-        // else if (strcmp(key,"val") == 0) { sscanf(value, "%u", val); }
     }
     m_uri = m_url;
     while (*m_uri == '/') m_uri++;
@@ -704,9 +702,14 @@ void ExRequest::parseCookie()
     const char *key = NULL, *value = NULL;
     cgi_load_t load;
     char* qr;
-    size_t i, len = httpd_req_get_hdr_value_len(m_req, http_cookie);
-    m_cookie.clear();
-    if (m_cookie_mem) {free(m_cookie_mem);m_cookie_mem=NULL;}
+    size_t i, len;
+    
+    if (m_cookie_mem) {
+        m_cookie.clear();
+        free(m_cookie_mem);
+        m_cookie_mem=NULL;
+    }
+    len = httpd_req_get_hdr_value_len(m_req, http_cookie);    
     if (len == 0) return;
     /* Allocate memory for cookie string */
     m_cookie_mem = (char *)malloc(len + 2);

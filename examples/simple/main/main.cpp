@@ -62,8 +62,8 @@ void SETUP_task(void *parameter)
 
 	e.get("add/:id/:val", [](Express* c, ExRequest* req) {
 		char buf[1024];
-		int id = req->paramInt("id");
-		int val = req->paramInt("val");
+		int id = req->getParamInt("id");
+		int val = req->getParamInt("val");
 		msg_debug("Add id %d, val = %d", id, val);
 		snprintf(buf, 1023, "{ \"ok\": true, \"id\": %d, \"val\": %d }", id, val);
 		req->json(buf);

@@ -43,10 +43,8 @@ Express e;
  * \brief Session middleware.
  */
 bool sessionMiddleware(Express* c, ExRequest* req) {
-	const char *sessionID;
-	req->parseCookie();
+	const char *sessionID = req->getCookie("SessionID");
 
-	sessionID = req->getCookie("SessionID");
 	if (!sessionID) {
 		char uu_str[37];
 		if (strcmp(req->uri(),"index.html")) return true;
