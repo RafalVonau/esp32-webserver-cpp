@@ -89,16 +89,22 @@ public:
         m_req = rq;
         m_key = "";
         m_cookie_mem = NULL;
+        m_param_mem = NULL;
+        m_key_mem = NULL;
         parseURI();
     }
 
     ~ExRequest() {
         m_query.clear();
         m_cookie.clear();
-        if (m_url) free(m_url);
-        if (m_cookie_mem) free(m_cookie_mem);
+        if (m_url) free((void *)m_url);
+        if (m_cookie_mem) free((void *)m_cookie_mem);
+        if (m_param_mem) free((void *)m_param_mem);
+        if (m_key_mem) free((void *)m_key_mem);
     }
     const char* uri() const { return m_uri; }
+    
+    /* Parameters from query */
     const char* getArg(const char* key) {
         auto i = m_query.find(key);
         if (i == m_query.end()) return NULL;
@@ -116,6 +122,7 @@ public:
 
     void setKey(const char *key) { m_key = key; }
     
+    /* Parameters from cookie */
     void parseCookie();
     int cookieCount() const { return m_cookie.size(); }
     const char* getCookie(const char* key) {
@@ -125,7 +132,23 @@ public:
     }
     void setCookie(const char* cookie);
     
-
+    /* Parameters from uri like /api/add/:id/:val (name will be id and val) */
+    void parseParams();
+    const char *paramString(const char *name) {
+        if (!m_param_mem) parseParams();
+        auto i = m_param.find(name);
+        if (i == m_param.end()) return NULL;
+        return i->second;
+    }
+    int paramInt(const char *name, int defVal = -1) {
+        int v = defVal;
+        const char *val = paramString(name);
+        if (val) {
+            if (sscanf(val, "0x%x", &v) == 1) return v;
+            if (sscanf(val, "%d", &v) == 1) return v;
+        }
+        return defVal;
+    }
 
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
@@ -140,12 +163,11 @@ private:
 
 public:
     httpd_req_t* m_req;
-    char* m_url;
-    char* m_cookie_mem;
-    const char* m_uri;
-    const char* m_key;
-    std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from url    */
+    char *m_url, *m_cookie_mem, *m_param_mem, *m_key_mem;
+    const char *m_uri, *m_key;
+    std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from query  */
     std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from uri    */
     std::map<std::string, std::string> m_user;                        /*!< Additional parameters  */
 };
 

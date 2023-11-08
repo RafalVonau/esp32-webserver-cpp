@@ -59,6 +59,16 @@ void SETUP_task(void *parameter)
 	e.get("test0", [](Express* c, ExRequest* req) {
 		req->json("{ \"test0\": true }");
 	});
+
+	e.get("add/:id/:val", [](Express* c, ExRequest* req) {
+		char buf[1024];
+		int id = req->paramInt("id");
+		int val = req->paramInt("val");
+		msg_debug("Add id %d, val = %d", id, val);
+		snprintf(buf, 1023, "{ \"ok\": true, \"id\": %d, \"val\": %d }", id, val);
+		req->json(buf);
+	});
+
 	e.addStatic(www_filesystem);
 	e.on("test", [](Express* c, WSRequest* req, char* arg, int arg_len) {
 		std::string s(arg, arg_len);
@@ -104,12 +114,12 @@ extern "C" void app_main(void)
 	 */
 	ESP_ERROR_CHECK(example_connect());
 
-    //initialize mDNS service
-    ESP_ERROR_CHECK(mdns_init());
-    mdns_hostname_set(m_hostname.c_str());
-    mdns_instance_name_set(m_hostname.c_str());
-    mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
-    msg_info("Host name: %s.local\n", m_hostname.c_str());
+	//initialize mDNS service
+	ESP_ERROR_CHECK(mdns_init());
+	mdns_hostname_set(m_hostname.c_str());
+	mdns_instance_name_set(m_hostname.c_str());
+	mdns_service_add(NULL, "_http", "_tcp", 80, NULL, 0);
+	msg_info("Host name: %s.local\n", m_hostname.c_str());
 
 	xTaskCreatePinnedToCore(SETUP_task, "SETUP",10000, NULL, /* prio */ 0, /* task handle */ NULL, 1);
 	vTaskDelete(NULL); /* Delete SETUP task */

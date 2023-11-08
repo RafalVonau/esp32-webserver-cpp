@@ -720,11 +720,6 @@ void ExRequest::parseCookie()
     value = NULL;
     for (i = 0;i < len;++i) {
         switch (qr[i]) {
-            // case ':': {
-            //     qr[i] = '\0';
-            //     value = NULL;
-            //     key = &qr[i + 1];
-            // } break;
             case '=': {
                 load = cgi_load_value;
                 qr[i] = '\0';
@@ -759,6 +754,39 @@ void ExRequest::parseCookie()
         m_cookie.insert({ key, value });
     }
 }
+
+void ExRequest::parseParams()
+{
+    m_param.clear();
+    if (m_param_mem) free(m_param_mem);
+    if (m_key_mem) free(m_key_mem);
+    m_param_mem = strdup(this->uri());
+    m_key_mem = strdup(m_key);
+    {
+        bool final = false;
+        char *a = m_key_mem, *b = m_param_mem, *key, *val;
+        
+	    while ((*a != '\0') && (*b != '\0')) {
+    		if (*a == ':') {
+                a++;
+                key = a;
+                val = b;
+			    /* Skip section */
+			    while ((*a != '/') && (*a != '\0')) a++;
+			    while ((*b != '/') && (*b != '\0')) b++;
+                if ((*a== '\0') || (*b== '\0')) final = true;
+                *a='\0';
+                *b='\0';
+                msg_error("Key = %s, val = %s", key, val);
+                m_param.insert({ key, val });
+		    }
+            if (final) break;
+	    	a++;
+		    b++;
+	    }
+    }
+}
+
 
 esp_err_t ExRequest::json(const char* resp, int len)
 {
