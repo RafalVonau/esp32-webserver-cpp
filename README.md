@@ -83,7 +83,7 @@ You can also use IDE to build this project on Linux/Windows/Mac. My fvorite one:
 # Example page
 The page is based on [Next.js](https://nextjs.org/) and [Mantine UI](https://mantine.dev/).
 
-# Building page under linux (requires nodejs instalation and perl interpreter)
+## Building page under linux (requires nodejs instalation and perl interpreter)
 * cd www-next
 * npm i
 * ./compile.sh
