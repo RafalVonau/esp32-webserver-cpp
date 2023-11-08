@@ -88,11 +88,15 @@ public:
         m_uri = m_url;
         m_req = rq;
         m_key = "";
+        m_cookie_mem = NULL;
         parseURI();
     }
 
     ~ExRequest() {
-        free(m_url);
+        m_query.clear();
+        m_cookie.clear();
+        if (m_url) free(m_url);
+        if (m_cookie_mem) free(m_cookie_mem);
     }
     const char* uri() const { return m_uri; }
     const char* getArg(const char* key) {
@@ -111,6 +115,18 @@ public:
     int argCount() const { return m_query.size(); }
 
     void setKey(const char *key) { m_key = key; }
+    
+    void parseCookie();
+    int cookieCount() const { return m_cookie.size(); }
+    const char* getCookie(const char* key) {
+        auto i = m_cookie.find(key);
+        if (i == m_cookie.end()) return NULL;
+        return i->second;
+    }
+    void setCookie(const char* cookie);
+    
+
+
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
@@ -118,15 +134,19 @@ public:
     esp_err_t gzip(const char* type, const char* resp, int len = 0);
     esp_err_t send(const char* type, const char* resp, int len);
     esp_err_t send_res(esp_err_t ret);
+
 private:
     void parseURI();
 
 public:
     httpd_req_t* m_req;
     char* m_url;
+    char* m_cookie_mem;
     const char* m_uri;
     const char* m_key;
-    std::map<const char*, const char*, ExRequest_cmp_str> m_query;
+    std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from url    */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie */
+    std::map<std::string, std::string> m_user;                        /*!< Additional parameters  */
 };
 
 #define WS_MAX_FRAME_SIZE (4100)
@@ -184,7 +204,7 @@ public:
     void start(int port = 80, uint8_t pr = 0, BaseType_t coreID = tskNO_AFFINITY);
 
     /*!
-     * \brief Check for meta keys ( *, : ) in path.
+     * \brief Check for meta keys ( *, : , #) in path.
      */
     bool hasMeta(const char *a) const;
     /*!
@@ -192,12 +212,12 @@ public:
      */
     bool comparePath(const char *a, const char *b) const;
 
-    void get(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lget.push_back({ path, cb }); else m_get.insert({ path, cb }); }
-    void post(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lpost.push_back({ path, cb }); else m_post.insert({ path, cb }); }
-    void del(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_ldelete.push_back({ path, cb }); else m_delete.insert({ path, cb }); }
+    void get(const char* path, ExpressPageCB cb)   { if (hasMeta(path)) m_lget.push_back({ path, cb }); else m_get.insert({ path, cb }); }
+    void post(const char* path, ExpressPageCB cb)  { if (hasMeta(path)) m_lpost.push_back({ path, cb }); else m_post.insert({ path, cb }); }
+    void del(const char* path, ExpressPageCB cb)   { if (hasMeta(path)) m_ldelete.push_back({ path, cb }); else m_delete.insert({ path, cb }); }
     void patch(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lpatch.push_back({ path, cb }); else m_patch.insert({ path, cb }); }
-    void put(const char* path, ExpressPageCB cb) { if (hasMeta(path)) m_lput.push_back({ path, cb }); else m_put.insert({ path, cb }); }
-    void all(const char* path, ExpressPageCB cb) { 
+    void put(const char* path, ExpressPageCB cb)   { if (hasMeta(path)) m_lput.push_back({ path, cb }); else m_put.insert({ path, cb }); }
+    void all(const char* path, ExpressPageCB cb)   { 
         if (hasMeta(path)) {
             /* put to std::list */
             m_lget.push_back({ path, cb });
@@ -214,8 +234,15 @@ public:
             m_put.insert({ path, cb });
         }
     }
+
     /* Middleware */
     void use(const char* path, ExpressMidCB cb) { if (*path == '\0') m_midAll.push_back({ path, cb }); else m_mid.push_back({ path, cb }); }
+    void get(const char* path, ExpressPageCB cb, ExpressMidCB m)   { get(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
+    void post(const char* path, ExpressPageCB cb, ExpressMidCB m)  { post(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });  }
+    void del(const char* path, ExpressPageCB cb, ExpressMidCB m)   { del(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
+    void patch(const char* path, ExpressPageCB cb, ExpressMidCB m) { patch(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); }); }
+    void put(const char* path, ExpressPageCB cb, ExpressMidCB m)   { put(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
+    void all(const char* path, ExpressPageCB cb, ExpressMidCB m)   { all(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
         
     /* Websocket events */
     void onWS(ExpressWSCB w) { m_wsCB = w; }

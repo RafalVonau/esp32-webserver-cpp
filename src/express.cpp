@@ -240,14 +240,14 @@ Express::~Express()
 }
 
 /*!
- * \brief Check for meta keys ( *, : ) in path.
+ * \brief Check for meta keys ( *, :, # ) in path.
  */
 bool Express::hasMeta(const char *a) const
 {
     const char *ch = a;
     while (*ch != '\0') {
         /* Check for meta characters */
-        if ((*ch == '*') || (*ch == ':')) return true;
+        if ((*ch == '*') || (*ch == ':') || (*ch == '#')) return true;
         ch++;
     }
     return false;
@@ -260,6 +260,7 @@ bool Express::comparePath(const char *a, const char *b) const
 {
     if (*a == '\0') return true;
 	while ((*a != '\0') && (*b != '\0')) {
+        if (*a == '#') return true;
 		if ((*a == '*') || (*a == ':')) {
 			/* Skip section */
 			while ((*a != '/') && (*a != '\0')) a++;
@@ -677,6 +678,7 @@ void ExRequest::parseURI()
     if (strlen(m_uri) == 0) m_uri = "index.html";
 }
 
+
 /* const httpd related values stored in ROM */
 const static char http_200_hdr[] = "200 OK";
 const static char http_content_type_html[] = "text/html";
@@ -689,7 +691,74 @@ const static char http_cache_control_no_cache[] = "no-store, no-cache, must-reva
 const static char http_pragma_hdr[] = "Pragma";
 const static char http_pragma_no_cache[] = "no-cache";
 const static char http_content_type_txt[] = "text/plain";
+const static char http_set_cookie[] = "Set-Cookie";
+const static char http_cookie[] = "Cookie";
 
+void ExRequest::setCookie(const char* cookie)
+{
+    httpd_resp_set_hdr(m_req, http_set_cookie, cookie);
+}
+
+void ExRequest::parseCookie() 
+{
+    const char *key = NULL, *value = NULL;
+    cgi_load_t load;
+    char* qr;
+    size_t i, len = httpd_req_get_hdr_value_len(m_req, http_cookie);
+    m_cookie.clear();
+    if (m_cookie_mem) {free(m_cookie_mem);m_cookie_mem=NULL;}
+    if (len == 0) return;
+    /* Allocate memory for cookie string */
+    m_cookie_mem = (char *)malloc(len + 2);
+    if (!m_cookie_mem) return;
+    /* Get cookie string */
+    httpd_req_get_hdr_value_str(m_req, http_cookie, m_cookie_mem, len + 1);
+    // msg_error("Got cookie string: %s",m_cookie_mem);
+    /* decode cookie string */
+    load = cgi_load_key;
+    key = qr = m_cookie_mem;
+    value = NULL;
+    for (i = 0;i < len;++i) {
+        switch (qr[i]) {
+            // case ':': {
+            //     qr[i] = '\0';
+            //     value = NULL;
+            //     key = &qr[i + 1];
+            // } break;
+            case '=': {
+                load = cgi_load_value;
+                qr[i] = '\0';
+                value = &qr[i + 1];
+            } break;
+            case ';': {
+                if (load == cgi_load_key) {
+                    key = &qr[i + 1];
+                    value = NULL;
+                } else {
+                    qr[i] = '\0';
+                    load = cgi_load_key;
+                    if ((key) && (value)) {
+                        while (*key == ' ') key++;
+                        while (*value == ' ') value++;
+                        /* process key/value */
+                        // msg_error("Key: %s, value: %s", key, value);
+                        m_cookie.insert({ key, value });
+                    }
+                    key = &qr[i + 1];
+                    value = NULL;
+                }
+            } break;
+            default: break;
+        }
+    }
+    if ((key) && (value)) {
+        while (*key == ' ') key++;
+        while (*value == ' ') value++;
+        /* process key/value */
+        // msg_error("Key: %s, value: %s", key, value);
+        m_cookie.insert({ key, value });
+    }
+}
 
 esp_err_t ExRequest::json(const char* resp, int len)
 {
