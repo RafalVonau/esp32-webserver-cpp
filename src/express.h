@@ -147,6 +147,21 @@ public:
         return defVal;
     }
 
+    /* Read data */
+    int getContentLen() const { return m_req->content_len; }
+    std::string readAll() {
+        int len = m_req->content_len;
+        std::string res(len, 0);
+        if ( httpd_req_recv(m_req, (char *)&res[0], len) == len) {
+            return res;
+        }
+        return std::string();
+    }
+    int read(char *buf, int len) {
+        return httpd_req_recv(m_req, buf, len);
+    }
+
+    /* Write answer */
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
@@ -154,6 +169,8 @@ public:
     esp_err_t gzip(const char* type, const char* resp, int len = 0);
     esp_err_t send(const char* type, const char* resp, int len);
     esp_err_t send_res(esp_err_t ret);
+    esp_err_t error(const char *status);
+
     
     esp_err_t redirect(const char *path, const char *type = "302 Found");
 

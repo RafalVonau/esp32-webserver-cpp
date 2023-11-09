@@ -817,6 +817,14 @@ esp_err_t ExRequest::send_res(esp_err_t ret)
     }
 }
 
+esp_err_t ExRequest::error(const char *status)
+{
+    httpd_resp_set_status(m_req, status);
+    httpd_resp_set_type(m_req, http_content_type_txt);
+    return httpd_resp_send(m_req, NULL, 0);
+}
+
+
 esp_err_t ExRequest::gzip(const char* type, const char* resp, int len)
 {
     if (len == 0) len = strlen(resp);
