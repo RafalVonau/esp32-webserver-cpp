@@ -49,6 +49,24 @@ function MyApp({ Component, pageProps }) {
 
 	useHotkeys([["mod+J", () => toggleColorScheme()]]);
 
+	axios.interceptors.response.use(
+		(res) => {
+			return res;
+		},
+		async (err) => {
+			console.log('An error: ' + err.status)
+			const originalConfig = err.config;
+			console.log('err: ' + err)
+	
+			if (originalConfig.url !== "/login" && err.response) {
+				if (err.response.status === 401) {
+				  router.push('/login');
+				}
+			}
+			return Promise.reject(err);
+		}
+	);
+
 	const actions = [
 		{
 			title: "Home",
