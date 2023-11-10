@@ -21,6 +21,7 @@
 #include "protocol_examples_common.h"
 #include "www_fs.h"
 #include "cJSON.h"
+#include "ramlog.h"
 
 static char tag[] = "EXM";
 #if 1
@@ -126,9 +127,8 @@ void SETUP_task(void* parameter)
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
 	});
 	
-	e.get("api/log", withAuth, [](ExRequest* req) {
-		req->json("[ {\"s\":1696851532,\"ms\":810,\"p\":1,\"x\":\"main\",\"y\":\"main\",\"z\":\"START\"},"
-			"{\"s\":1696851532,\"ms\":960,\"p\":0,\"x\":\"\",\"y\":\"\",\"z\":\"HW: ESP32 \"} ]");
+	e.get("api/log", [](ExRequest* req) {
+		req->txt(RAMLog::instance()->read().c_str());
 	});
 
 	e.post("api/login", [](ExRequest* req) {
@@ -183,6 +183,10 @@ extern "C" void app_main(void)
 	esp_chip_info_t chip_info;
 	std::string m_hostname = "express";
 	// esp_pm_config_esp32_t m_pcfg;
+
+	/* Activate RAM log */
+	RAMLog::instance()->install();
+
 
 	/* Print chip information */
 	esp_chip_info(&chip_info);
