@@ -38,11 +38,13 @@ static const char* TAG = "Express";
 #define msg_init(fmt, args...)  ESP_LOGI(TAG, fmt, ## args);
 #define msg_debug(fmt, args...)  ESP_LOGI(TAG, fmt, ## args);
 #define msg_error(fmt, args...)  ESP_LOGE(TAG, fmt, ## args);
+#define msg_ota(fmt, args...)  ESP_LOGI(TAG, fmt, ## args);
 #else
 #define msg_info(fmt, args...)
 #define msg_init(fmt, args...)
 #define msg_debug(fmt, args...)
 #define msg_error(fmt, args...)  ESP_LOGE(TAG, fmt, ## args);
+#define msg_ota(fmt, args...)  ESP_LOGI(TAG, fmt, ## args);
 #endif
 
 #define HTTP_CHUNK_SIZE      (4096)
@@ -452,14 +454,20 @@ esp_err_t Express::doWS(WSRequest* rq)
             ret = ota_stop(2); /* Abort any pending OTA update */
             if (ret == ESP_OK) {
                 if (sscanf(dt, "%u %u", &__ota_id, &__ota_size) == 2) {
+                    msg_ota("ota request id = %d, size = %d",__ota_id, __ota_size);
                     __ota_start_timestamp = esp_timer_get_time();
                     __ota_update_partition = esp_ota_get_next_update_partition(NULL);
                     __ota_cnt = 0;
                     ret = esp_ota_begin(__ota_update_partition, __ota_size, &__ota_update_handle);
                     rq->res_val("ota", ret, 0);
-                    if (ret == ESP_OK) { __ota_active = 1; }
+                    if (ret == ESP_OK) { 
+                        __ota_active = 1; 
+                    } else {
+                        msg_error("esp_ota_begin error = %d", ret);
+                    }
                 }
             } else {
+                msg_error("ota_stop(2) error = %d", ret);
                 rq->res_val("ota", ESP_FAIL, 0);
             }
         } else {
@@ -492,6 +500,7 @@ esp_err_t Express::doWS(WSRequest* rq)
         if (__ota_active) {
             uint32_t* v = (uint32_t*)rq->payload();
             if (*v == __ota_id) {
+                // msg_ota("Write block size = %d", rq->len());
                 ret = esp_ota_write(__ota_update_handle, &rq->payload()[4], (rq->len() - 4));
                 if (ret != ESP_OK) {
                     msg_error("OTA write error !");
@@ -500,7 +509,7 @@ esp_err_t Express::doWS(WSRequest* rq)
                     __ota_active = 0;
                 } else {
                     __ota_cnt += (rq->len() - 4);
-                    msg_info("(%d) Download Progress: %0.2f %%", rq->len(), ((float)(__ota_cnt) / __ota_size) * 100);
+                    msg_ota("(%d) Download Progress: %0.2f %%", rq->len(), ((float)(__ota_cnt) / __ota_size) * 100);
                     if (__ota_cnt >= __ota_size) {
                         ret = ota_stop(0);
                         rq->res_val("ota", ret, __ota_size);
@@ -558,13 +567,13 @@ esp_err_t Express::ota_stop(uint32_t abort)
             __ota_active = 0;
             return esp_ota_abort(__ota_update_handle);
         } else {
-            msg_info("Time taken to download firmware: %0.3f s", (float)(esp_timer_get_time() - __ota_start_timestamp) / 1000000L);
-            msg_info("Firmware size: %uKB", __ota_size / 1024);
+            msg_ota("Time taken to download firmware: %0.3f s", (float)(esp_timer_get_time() - __ota_start_timestamp) / 1000000L);
+            msg_ota("Firmware size: %uKB", __ota_size / 1024);
             ret = esp_ota_end(__ota_update_handle);
             if (ret == ESP_OK) {
                 ret = esp_ota_set_boot_partition(__ota_update_partition);
             }
-            msg_info("OTA result: %d", ret);
+            msg_ota("OTA result: %d", ret);
         }
     }
     __ota_active = 0;
@@ -583,7 +592,7 @@ esp_err_t Express::ota_post_handler(httpd_req_t* req)
 
     if (!recv_buf) { return ESP_FAIL; }
 
-    msg_info("Content length: %d B", content_length);
+    msg_ota("Content length: %d B", content_length);
 
     int remaining = content_length;
 
@@ -619,7 +628,7 @@ esp_err_t Express::ota_post_handler(httpd_req_t* req)
         count += ret;
         remaining -= ret;
         memset(recv_buf, 0x00, HTTP_CHUNK_SIZE);
-        msg_info("Download Progress: %0.2f %%", ((float)(content_length - remaining) / content_length) * 100);
+        msg_ota("Download Progress: %0.2f %%", ((float)(content_length - remaining) / content_length) * 100);
     }
     free(recv_buf);
 
