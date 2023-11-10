@@ -10,13 +10,13 @@ Example usage:
 Express e;
 
 /* Parameters by query string  (like /api/test?nr=12) */
-e.get("api/test", [](Express* c, ExRequest* req) {
+e.get("api/test", [](ExRequest* req) {
   int id = req->getArgInt("nr", 0);
   req->json("{ \"test\": true }");
 });
 
-/* Parameters by path  (like /api/add/10/12 ) */
-e.get("api/add/:id/:val", [](Express* c, ExRequest* req) {
+/* Parameters by path (like /api/add/10/12 ) */
+e.get("api/add/:id/:val", [](ExRequest* req) {
   int id = req->getParamInt("id");
   int val = req->getParamInt("val");
   // .. do something with id and val
@@ -24,29 +24,28 @@ e.get("api/add/:id/:val", [](Express* c, ExRequest* req) {
 });
 
 /* Ignore section (use *) /api/[anything]/move */
-e.get("api/*/move", [](Express* c, ExRequest* req) {
+e.get("api/*/move", [](ExRequest* req) {
     req->json("{ \"move\": true }");
 });
 
-/* Ignore rest of the uri (use #) /api/copy/[any path] */
-e.get("api/copy/#", [](Express* c, ExRequest* req) {
+/* Ignore rest of the path (use #) /api/copy/[any path] */
+e.get("api/copy/#", [](ExRequest* req) {
     req->json("{ \"copy\": true }");
 });
 
 /* Add session middleware */
-bool sessionMiddleware(Express* c, ExRequest* req) {
+bool sessionMiddleware(ExRequest* req) {
 	const char *sessionID;
 
 	sessionID = req->getCookie("SessionID");
 	if (!sessionID) {
-		char uu_str[37];
 		if (strcmp(req->uri(),"index.html")) return true;
 		/* Generate new session ID */	
-		UUIDGen(uu_str);
-		req->m_user["sessionid"] = std::string(uu_str);
-		req->m_user["cookie"] = "SessionID=" + std::string(uu_str) + "; Max-Age=2592000";
+		std::string uuid = req->m_e->generateUUID();
+		req->m_user["sessionid"] = uuid;
+		req->m_user["cookie"] = "SessionID=" + uuid + "; Max-Age=2592000";
 		req->setCookie(req->m_user["cookie"].c_str());
-		msg_debug("Generate new session ID: %s",uu_str);
+		msg_debug("Generate new session ID: %s",uuid.c_str());
 	} else {
 		msg_debug("Got session ID: %s",sessionID);
 		req->m_user["sessionid"] = std::string(sessionID);
@@ -54,13 +53,44 @@ bool sessionMiddleware(Express* c, ExRequest* req) {
 	return true;
 }
 
+/* Empty string "" = execute for any path */
 e.use("", sessionMiddleware);
+
+/* Add middleware in .get .post ... methods (maximum 3 middlewares) */
+
+bool withAuth(ExRequest* req) { .... }
+
+e.get("api/secure", withAuth, [](ExRequest* req) {
+    req->json("{ \"copy\": true }");
+});
+
+
+/* Get data from post request */
+e.post("api/login", [](ExRequest* req) {
+	bool ok = false;
+	std::string json = req->readAll();
+	...
+});
+
 
 /* Add static pages compiled from Next.js */
 e.addStatic(www_filesystem);
 
 /* start server port = 80, priotity = 7, bind to core ID 1 */
 e.start(80, 7, 1);
+
+/* Builtin support for Authorization when CONFIG_EXPRESS_USE_AUTH is defined */
+e.use("", e.getSessionMW());
+
+auto withAuth = e.getWithAuthMW();
+
+e.get("api/login", e.getStdLoginFunction());
+
+e.get("api/logout", [](ExRequest* req) {
+	e.doLogOut(req);
+	req->json("{ \"ok\": true }");
+});
+
 ```
 See more details in examples folder.
 

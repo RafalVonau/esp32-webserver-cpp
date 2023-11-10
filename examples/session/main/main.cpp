@@ -20,7 +20,6 @@
 #include "mdns.h"
 #include "protocol_examples_common.h"
 #include "www_fs.h"
-#include "uuid.h"
 
 static char tag[] = "EXM";
 #if 1
@@ -42,18 +41,17 @@ Express e;
 /*!
  * \brief Session middleware.
  */
-bool sessionMiddleware(Express* c, ExRequest* req) {
+bool sessionMiddleware(ExRequest* req) {
 	const char *sessionID = req->getCookie("SessionID");
 
 	if (!sessionID) {
-		char uu_str[37];
 		if (strcmp(req->uri(),"index.html")) return true;
-			/* Generate new session ID */<->
-			UUIDGen(uu_str);
-			req->m_user["sessionid"] = std::string(uu_str);
-			req->m_user["cookie"] = "SessionID=" + std::string(uu_str) + "; Max-Age=2592000";
+			/* Generate new session ID */
+			std::string uuid = req->m_e->generateUUID();
+			req->m_user["sessionid"] = uuid;
+			req->m_user["cookie"] = "SessionID=" + uuid + "; Max-Age=2592000";
 			req->setCookie(req->m_user["cookie"].c_str());
-			msg_debug("Generate new session ID: %s",uu_str);
+			msg_debug("Generate new session ID: %s", uuid.c_str());
 		} else {
 			msg_debug("Got session ID: %s",sessionID);
 			req->m_user["sessionid"] = std::string(sessionID);
@@ -67,21 +65,21 @@ void SETUP_task(void *parameter)
 
 	e.use("", sessionMiddleware);
 
-	e.get("api/info", [](Express* c, ExRequest* req) {
+	e.get("api/info", [](ExRequest* req) {
 		req->json("[{\"k\": \"Serial number\", \"v\": 1},{\"k\": \"Firmware\", \"v\": \"ESP32 test\"} ]");
 	});
-	e.get("api/network", [](Express* c, ExRequest* req) {
+	e.get("api/network", [](ExRequest* req) {
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
 	});
 
-	e.get("api/log", [](Express* c, ExRequest* req) {
+	e.get("api/log", [](ExRequest* req) {
 		req->json("[ {\"s\":1696851532,\"ms\":810,\"p\":1,\"x\":\"main\",\"y\":\"main\",\"z\":\"START\"},"
 		"{\"s\":1696851532,\"ms\":960,\"p\":0,\"x\":\"\",\"y\":\"\",\"z\":\"HW: ESP32 \"} ]");
 	});
 
 	e.addStatic(www_filesystem);
 
-	e.on("test", [](Express* c, WSRequest* req, char* arg, int arg_len) {
+	e.on("test", [](WSRequest* req, char* arg, int arg_len) {
 		std::string s(arg, arg_len);
 		msg_debug("Got test value <%s>", s.c_str());
 		req->send(s.c_str());

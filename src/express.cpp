@@ -26,7 +26,10 @@
 #include "esp_sntp.h"
 #include <string>
 #include "express.h"
+#include "mbedtls/base64.h"
+#include "bootloader_random.h"
 // #include "esp_httpd_priv.h"
+#include "cJSON.h"
 
 static const char* TAG = "Express";
 
@@ -53,6 +56,21 @@ static void reboot(void)
     msg_info("Rebooting in 1 seconds...");
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     esp_restart();
+}
+
+time_t express_get_time_s() 
+{
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec;
+}
+
+uint64_t express_get_time_ms() 
+{
+    uint64_t r;
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return tv.tv_sec * 1000LL + tv.tv_usec / 1000;
 }
 
 /*!
@@ -125,8 +143,8 @@ static esp_err_t express_put_handler(httpd_req_t* req)
 
 static esp_err_t express_ws_handler(httpd_req_t* req)
 {
-    WSRequest r(req);
     Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
+    WSRequest r(req, e);
     esp_err_t ret;
 
     ret = httpd_ws_recv_frame(req, &r.m_pkt, WS_MAX_FRAME_SIZE);
@@ -200,19 +218,19 @@ Express::Express()
     m_wsCB = NULL;
 
     /* Generic API */
-    get("api/mem", [](Express* c, ExRequest* req) {
+    get("api/mem", [](ExRequest* req) {
         char resp_jsonb[256];
         /* Send JSON as response */
         snprintf(resp_jsonb, 255, "{ \"free\": %d, \"reset\": %d }", esp_get_free_heap_size(), esp_reset_reason());
         req->json((const char*)resp_jsonb, strlen(resp_jsonb));
     });
-    get("api/restart", [](Express* c, ExRequest* req) {
+    get("api/restart", [](ExRequest* req) {
         req->json("{ \"ok\": true }");
         reboot();
     });
 
 #ifdef CONFIG_PM_PROFILING
-    get("api/pm", [](Express* c, ExRequest* req) {
+    get("api/pm", [](ExRequest* req) {
         char* buf = (char*)::calloc(HTTP_CHUNK_SIZE, sizeof(char));
         if (buf) {
             FILE* stream;
@@ -225,7 +243,7 @@ Express::Express()
     });
 #endif
     /* OTA */
-    post("ota", [](Express* c, ExRequest* req) { c->ota_post_handler(req->m_req); });
+    post("ota", [](ExRequest* req) { req->m_e->ota_post_handler(req->m_req); });
 }
 
 /*!
@@ -325,7 +343,7 @@ const static char http_404_hdr[] = "404 Not Found";
  */
 esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
 {
-    ExRequest rq(req);
+    ExRequest rq(req, this);
     esp_err_t ret = ESP_OK;
     do_pm_lock();
 
@@ -334,7 +352,7 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
         auto itr1 = m_midAll.cbegin();
         while (itr1 != m_midAll.cend()) {
             rq.setKey(itr1->first);
-            if (!itr1->second(this, &rq)) {
+            if (!itr1->second(&rq)) {
                 do_pm_unlock();
                 return ret;
             }
@@ -346,7 +364,7 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
         while (itr1 != m_mid.cend()) {
             if (comparePath(itr1->first, rq.uri())) {
                 rq.setKey(itr1->first);
-                if (!itr1->second(this, &rq)) {
+                if (!itr1->second(&rq)) {
                     do_pm_unlock();
                     return ret;
                 }
@@ -360,7 +378,7 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
         auto i = m->find(rq.uri());
         if (i != m->end()) {
             rq.setKey(i->first);
-            i->second(this, &rq);
+            i->second(&rq);
             do_pm_unlock();
             return ret;
         }
@@ -372,7 +390,7 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
         while (i != l->cend()) {
             if (comparePath(i->first, rq.uri())) {
                 rq.setKey(i->first);
-                i->second(this, &rq);
+                i->second(&rq);
                 do_pm_unlock();
                 return ret;
             }
@@ -402,9 +420,9 @@ void Express::addStatic(struct www_file_t *f)
     while (l) {
         n = &f[i];
         if (n->gz) {
-            get(n->name, [n](Express* c, ExRequest* req) { req->gzip(n->mime_type, n->data, n->size); });
+            get(n->name, [n](ExRequest* req) { req->gzip(n->mime_type, n->data, n->size); });
         } else {
-            get(n->name, [n](Express* c, ExRequest* req) { req->send(n->mime_type, n->data, n->size); });
+            get(n->name, [n](ExRequest* req) { req->send(n->mime_type, n->data, n->size); });
         }
         i++;
         l = strlen(f[i].name);
@@ -440,7 +458,7 @@ esp_err_t Express::doWS(WSRequest* rq)
                 rq->res_val("ota", ESP_FAIL, 0);
             }
         } else {
-            if (m_wsCB) m_wsCB(this, rq);
+            if (m_wsCB) m_wsCB(rq);
             if (m_on.size()) {
                 char *k = (char *)pl, *x;
                 int len = rq->len();
@@ -458,7 +476,7 @@ esp_err_t Express::doWS(WSRequest* rq)
                     while ((len > 0) && ((x[len - 1] == ']') || (x[len - 1] == ' '))) { x[len - 1] = '\0'; len--; }
                     if (len > 0) {
                         if (itr != m_on.end()) {
-                            itr->second(this, rq, x, len);
+                            itr->second(rq, x, len);
                         }
                     }
                 }
@@ -493,7 +511,7 @@ esp_err_t Express::doWS(WSRequest* rq)
             }
         } else {
             /* Handle WebSocket binary data frame */
-            if (m_wsCB) m_wsCB(this, rq);
+            if (m_wsCB) m_wsCB(rq);
         }
     }
 
@@ -611,6 +629,149 @@ esp_err_t Express::ota_post_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+/*!
+ * \brief Generate unique session ID.
+ */
+std::string Express::generateUUID()
+{
+    uint32_t v[9];
+    struct timeval tv;
+    std::string sid(44,0);
+    size_t olen = 0;
+
+	gettimeofday(&tv, NULL);
+    /* 64 bit timestamp */
+    v[0] = tv.tv_sec;
+    v[1] = tv.tv_usec;
+    /* 196 bit random */
+    v[2] = esp_random();
+    v[3] = esp_random();
+    v[4] = esp_random();
+    v[5] = esp_random();
+    v[6] = esp_random();
+    v[7] = esp_random();
+    /* Dummy for pad*/
+    v[8] = (uint32_t)this;
+    mbedtls_base64_encode((unsigned char *)&sid[0], 44, &olen, (const unsigned char *)&v[0], 33 );
+	return sid;
+}
+
+#ifdef CONFIG_EXPRESS_USE_AUTH
+
+void Express::cleanupOutdatedSessions()
+{
+    time_t v = express_get_time_s();
+	for (auto i = m_sessions.begin(); i != m_sessions.end();) {
+		auto j = i++;
+		ExpressSession *s = j->second;
+		if (s->expire < v ) {
+			msg_debug("Delete outdated session %s", j->first.c_str());
+			m_sessions.erase(j);
+			delete s;
+		}
+	}
+}
+//===========================================================================
+//=====================--- generic middleware  ---===========================
+//===========================================================================
+ExpressMidCB Express::getSessionMW(int maxAge)
+{
+    return [this, maxAge](ExRequest* req) {
+    	const char *sessionID;
+
+	    sessionID = req->getCookie("SessionID");
+	    if (!sessionID) {
+            if ((strcmp(req->uri(),"login")) && (strcmp(req->uri(),"index.html"))) return true;
+		    /* Cleanup outdated sessions */
+		    this->cleanupOutdatedSessions();
+		    /* Generate new session ID */
+            std::string uuid = generateUUID();
+		    req->m_user["sessionid"] = uuid;
+		    req->m_user["cookie"] = "SessionID=" + uuid + "; Max-Age=" + std::to_string(maxAge);
+		    req->setCookie(req->m_user["cookie"].c_str());
+		    msg_debug("Generate new session ID: %s", uuid.c_str());
+	    } else {
+            /* Store session ID from cookie */
+            std::string sid = std::string(sessionID);
+		    msg_debug("Got session ID: %s", sid.c_str());
+		    req->m_user["sessionid"] = sid;
+            req->m_session = m_sessions[sid];
+	    }
+	    return true;
+    };
+}
+
+/*!
+ * \brief withAuth middleware.
+ */
+ExpressMidCB Express::getWithAuthMW()
+{
+    return [this](ExRequest* req) {
+	    ExpressSession *s = req->m_session;	
+	    if (s) {
+		    /* Check expired */
+		    if (s->expire > express_get_time_s() ) {
+			    s->ping();
+			    return true;		
+		    }
+		    /* Delete session */
+		    m_sessions.erase(req->m_user["sessionid"]);
+            req->m_session = NULL;
+		    delete s;
+	    }
+	    req->error("401 Unauthorized");
+	    return false;
+    };
+}
+
+void Express::doLogin(ExRequest* req, std::string user)
+{
+    /* Create new session */
+    ExpressSession *s = new ExpressSession(user);
+    m_sessions[req->m_user["sessionid"]] = s;
+    req->m_session = s; 
+}
+
+void Express::doLogOut(ExRequest* req)
+{
+    std::string sid = req->m_user["sessionid"];
+	ExpressSession *s = m_sessions[sid];	
+	if (s) {
+		m_sessions.erase(sid);
+        req->m_session = NULL;
+		delete s;
+	}
+}
+
+ExpressPageCB Express::getStdLoginFunction()
+{
+	return [this](ExRequest* req) {
+        bool ok = false;
+	    std::string json = req->readAll();
+	    cJSON *j = cJSON_Parse(json.c_str());
+	    if ((cJSON_GetObjectItem(j, "user")) && (cJSON_GetObjectItem(j, "password"))) {
+		    char *user = cJSON_GetObjectItem(j,"user")->valuestring;
+		    char *password = cJSON_GetObjectItem(j,"password")->valuestring;
+		    msg_debug("Got user = %s, pass = %s", user, password);
+		    /* Analize user password ... */
+            auto k = this->m_passwd.find(user);
+            if (k != this->m_passwd.end()) {
+		        if (k->second == std::string(password)) {
+			        ok = true;
+			        this->doLogin(req, user);
+		        }
+            }
+	    }
+	    cJSON_Delete(j);
+	    if (ok) {
+		    req->json("{ \"ok\": true}");
+	    } else {
+		    req->error("403 Forbidden");
+	    }
+    };
+}
+
+#endif
 
 //===========================================================================
 //======================--- Request/Response  ---============================
@@ -950,4 +1111,3 @@ void WSRequest::send_to_all_clients(const char* buf)
 //     }
 // }
 // /* ========================================================================================== */
-

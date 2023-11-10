@@ -44,26 +44,39 @@ public:
 class Express;
 class ExRequest;
 class WSRequest;
+#ifdef CONFIG_EXPRESS_USE_AUTH
+class ExpressSession;
+#endif
+
+/*!
+ * \brief Get current time in seconds.
+ */
+time_t express_get_time_s();
+
+/*!
+ * \brief Get current time in miliseconds.
+ */
+uint64_t express_get_time_ms(); 
 
 /*!
  * \brief Page callback.
  * \param c - pointer to Express class,
  * \param req - pointer to request/response class.
  */
-typedef std::function<void(Express* c, ExRequest* req)> ExpressPageCB;
+typedef std::function<void(ExRequest* req)> ExpressPageCB;
 /*!
  * \brief Middleware callback.
  * \param c - pointer to Express class,
  * \param req - pointer to request/response class.
  * \return true - process next middleware or page, false - break processing.
  */
-typedef std::function<bool(Express* c, ExRequest* req)> ExpressMidCB;
+typedef std::function<bool(ExRequest* req)> ExpressMidCB;
 /*!
  * \brief WebSocket callback.
  * \param c - pointer to Express class,
  * \param req - pointer to WebSocket request/response class.
  */
-typedef std::function<void(Express* c, WSRequest* req)> ExpressWSCB;
+typedef std::function<void(WSRequest* req)> ExpressWSCB;
 /*!
  * \brief WebSocket callback.
  * \param c - pointer to Express class,
@@ -71,7 +84,7 @@ typedef std::function<void(Express* c, WSRequest* req)> ExpressWSCB;
  * \param arg - pointer to argument,
  * \param arg_arg - argument length in bytes.
  */
-typedef std::function<void(Express* c, WSRequest* req, char* arg, int arg_len)> ExpressWSON;
+typedef std::function<void(WSRequest* req, char* arg, int arg_len)> ExpressWSON;
 
 typedef std::map<const char*, ExpressPageCB, ExRequest_cmp_str> ExpressPgMap;
 typedef std::list<std::pair<const char*, ExpressPageCB> > ExpressPgList;
@@ -83,14 +96,18 @@ typedef std::list<std::pair<const char*, ExpressMidCB> > ExpressMidMap;
  */
 class ExRequest {
 public:
-    ExRequest(httpd_req_t* rq) {
+    ExRequest(httpd_req_t* rq, Express *e) {
         m_url = strdup(rq->uri);
         m_uri = m_url;
         m_req = rq;
         m_key = "";
+        m_e = e;
         m_cookie_mem = NULL;
         m_param_mem = NULL;
         m_key_mem = NULL;
+#ifdef CONFIG_EXPRESS_USE_AUTH
+        m_session = NULL;
+#endif
         parseURI();
     }
 
@@ -147,7 +164,7 @@ public:
         return defVal;
     }
 
-    /* Read data */
+    /* Read data (from post for example) */
     int getContentLen() const { return m_req->content_len; }
     std::string readAll() {
         int len = m_req->content_len;
@@ -171,7 +188,7 @@ public:
     esp_err_t send_res(esp_err_t ret);
     esp_err_t error(const char *status);
 
-    
+    /* Redirect to another location */
     esp_err_t redirect(const char *path, const char *type = "302 Found");
 
 private:
@@ -180,13 +197,17 @@ private:
     void parseCookie();
 
 public:
-    httpd_req_t* m_req;
+    Express      *m_e;
+    httpd_req_t  *m_req;
     char *m_url, *m_cookie_mem, *m_param_mem, *m_key_mem;
     const char *m_uri, *m_key;
-    std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from query  */
-    std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie */
-    std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from uri    */
-    std::map<std::string, std::string> m_user;                        /*!< Additional parameters  */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from query.   */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie.  */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from uri.     */
+    std::map<std::string, std::string> m_user;                        /*!< Additional parameters.   */
+#ifdef CONFIG_EXPRESS_USE_AUTH
+    ExpressSession *m_session;                                        /*!< Pointer to session data. */
+#endif
 };
 
 #define WS_MAX_FRAME_SIZE (4100)
@@ -196,9 +217,10 @@ public:
  */
 class WSRequest {
 public:
-    WSRequest(httpd_req_t* rq) {
+    WSRequest(httpd_req_t* rq, Express *e) {
         m_req = rq;
         m_server = rq->handle;
+        m_e = e;
         memset(&m_pkt, 0, sizeof(httpd_ws_frame_t));
         m_pkt.payload = m_buf;
         m_pkt.type = HTTPD_WS_TYPE_TEXT;
@@ -220,9 +242,29 @@ public:
     httpd_ws_frame_t  m_pkt;
     httpd_req_t      *m_req;
     httpd_handle_t    m_server;
+    Express          *m_e;
 };
 
+#ifdef CONFIG_EXPRESS_USE_AUTH
 
+class ExpressSession {
+public:
+	ExpressSession(std::string n, int st = 3600) {
+        sessionTimeout = st; 
+        userName = n; 
+        expire = express_get_time_s() + sessionTimeout; 
+    }
+	void ping() { 
+		expire = express_get_time_s() + sessionTimeout; 
+	}
+public:
+    int sessionTimeout;                          /*!< Session inactivity timeout in seconds. */
+	std::string userName;                        /*!< Logged user name.                      */
+	time_t expire;                               /*!< Timestam when the session will expire. */
+    std::map<std::string, std::string> m_user;   /*!< Additional parameters.                 */
+};
+
+#endif
 
 /*!
  * \brief HTTP Server.
@@ -252,6 +294,7 @@ public:
      */
     bool comparePath(const char *a, const char *b) const;
 
+    /* http methods */
     void get(const char* path, ExpressPageCB cb)   { if (hasMeta(path)) m_lget.push_back({ path, cb }); else m_get.insert({ path, cb }); }
     void post(const char* path, ExpressPageCB cb)  { if (hasMeta(path)) m_lpost.push_back({ path, cb }); else m_post.insert({ path, cb }); }
     void del(const char* path, ExpressPageCB cb)   { if (hasMeta(path)) m_ldelete.push_back({ path, cb }); else m_delete.insert({ path, cb }); }
@@ -277,18 +320,58 @@ public:
 
     /* Middleware */
     void use(const char* path, ExpressMidCB cb) { if (*path == '\0') m_midAll.push_back({ path, cb }); else m_mid.push_back({ path, cb }); }
-    void get(const char* path, ExpressPageCB cb, ExpressMidCB m)   { get(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
-    void post(const char* path, ExpressPageCB cb, ExpressMidCB m)  { post(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });  }
-    void del(const char* path, ExpressPageCB cb, ExpressMidCB m)   { del(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
-    void patch(const char* path, ExpressPageCB cb, ExpressMidCB m) { patch(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); }); }
-    void put(const char* path, ExpressPageCB cb, ExpressMidCB m)   { put(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
-    void all(const char* path, ExpressPageCB cb, ExpressMidCB m)   { all(path, [cb, m](Express* c, ExRequest* req) { if (m(c, req)) cb(c, req); });   }
+    /* Single middleware */
+    void get(const char* path, ExpressMidCB m, ExpressPageCB cb)   { get(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
+    void post(const char* path, ExpressMidCB m, ExpressPageCB cb)  { post(path, [cb, m](ExRequest* r)  { if (m(r)) cb(r); }); }
+    void del(const char* path, ExpressMidCB m, ExpressPageCB cb)   { del(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
+    void patch(const char* path, ExpressMidCB m, ExpressPageCB cb) { patch(path, [cb, m](ExRequest* r) { if (m(r)) cb(r); }); }
+    void put(const char* path, ExpressMidCB m, ExpressPageCB cb)   { put(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
+    void all(const char* path, ExpressMidCB m, ExpressPageCB cb)   { all(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
         
+    /* Middleware x 2 */
+    void get(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { get(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
+    void post(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)  { post(path,[cb,m,m1](ExRequest* r)  { if (m(r) && m1(r)) cb(r); }); }
+    void del(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { del(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
+    void patch(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb) { patch(path,[cb,m,m1](ExRequest* r) { if (m(r) && m1(r)) cb(r); }); }
+    void put(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { put(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
+    void all(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { all(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
+
+    /* Middleware x 3 */
+    void get(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { get(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+    void post(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)  { post(path,[cb,m,m1,m2](ExRequest* r)  { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+    void del(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { del(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+    void patch(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb) { patch(path,[cb,m,m1,m2](ExRequest* r) { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+    void put(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { put(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+    void all(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { all(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
+
+
     /* Websocket events */
     void onWS(ExpressWSCB w) { m_wsCB = w; }
     void on(const char* what, ExpressWSON cb) { m_on.insert({ what, cb }); }
     void off(const char* what) { m_on.erase(what); }
+    void once(const char* what, ExpressWSON cb) { 
+        m_on.insert({ what, [this,cb,what](WSRequest* req, char* arg, int arg_len) {
+            cb(req, arg, arg_len);
+            this->m_on.erase(what);
+        }}); 
+    }
 
+    std::string generateUUID();
+
+#ifdef CONFIG_EXPRESS_USE_AUTH
+    /* Session helper */
+    void cleanupOutdatedSessions();
+    
+    /* Buildin middlewares */
+    ExpressMidCB getSessionMW(int maxAge = 2592000);
+    ExpressMidCB getWithAuthMW();
+    void doLogin(ExRequest* req, std::string user);
+    void doLogOut(ExRequest* req);
+
+    /* Std login */
+    void addUser(const char *userName, const char *pass) {m_passwd[userName] = pass;}
+    ExpressPageCB getStdLoginFunction();
+#endif
 
     /*!
      * \brief Add static files.
@@ -326,7 +409,12 @@ public:
     esp_ota_handle_t       __ota_update_handle;
     int64_t                __ota_start_timestamp;
     std::map<const char*, ExpressWSON, ExRequest_cmp_str> m_on;
+#ifdef CONFIG_EXPRESS_USE_AUTH
+    std::map<std::string, ExpressSession *> m_sessions;
+    std::map<std::string, std::string> m_passwd;
+#endif
 };
+
 
 #endif
 

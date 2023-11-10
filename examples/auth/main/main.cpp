@@ -20,7 +20,6 @@
 #include "mdns.h"
 #include "protocol_examples_common.h"
 #include "www_fs.h"
-#include "uuid.h"
 #include "cJSON.h"
 
 static char tag[] = "EXM";
@@ -39,19 +38,14 @@ static char tag[] = "EXM";
 
 Express e;
 
-time_t xx_time_get_time() {
-	struct timeval tv;
-	gettimeofday(&tv, NULL);
-	return tv.tv_sec;
-}
 
-#define INACTIVE_TIME_S (60)
+#define INACTIVE_TIME_S (3600)
 class SessionData {
 public:
 	SessionData() { logged_in = false; }
-	SessionData(std::string n) { logged_in = true;  userName = n; expire = xx_time_get_time() + INACTIVE_TIME_S; }
+	SessionData(std::string n) { logged_in = true;  userName = n; expire = express_get_time_s() + INACTIVE_TIME_S; }
 	void ping() {
-		expire = xx_time_get_time() + INACTIVE_TIME_S;
+		expire = express_get_time_s() + INACTIVE_TIME_S;
 	}
 	std::string userName;
 	time_t expire;
@@ -62,7 +56,7 @@ std::map<std::string, SessionData*> m_sessions;
 
 void cleanupOutdated()
 {
-	time_t v = xx_time_get_time();
+	time_t v = express_get_time_s();
 	for (auto i = m_sessions.begin(); i != m_sessions.end();) {
 		auto j = i++;
 		SessionData* s = j->second;
@@ -78,21 +72,20 @@ void cleanupOutdated()
 /*!
  * \brief Session middleware.
  */
-bool sessionMiddleware(Express* c, ExRequest* req) {
+bool sessionMiddleware(ExRequest* req) {
 	const char* sessionID;
 
 	sessionID = req->getCookie("SessionID");
 	if (!sessionID) {
-		char uu_str[37];
 		if ((strcmp(req->uri(), "login")) && (strcmp(req->uri(), "index.html"))) return true;
 		/* Cleanup outdated sessions */
 		cleanupOutdated();
 		/* Generate new session ID */
-		UUIDGen(uu_str);
-		req->m_user["sessionid"] = std::string(uu_str);
-		req->m_user["cookie"] = "SessionID=" + std::string(uu_str) + "; Max-Age=2592000";
+		std::string uuid = req->m_e->generateUUID();
+		req->m_user["sessionid"] = uuid;
+		req->m_user["cookie"] = "SessionID=" + uuid + "; Max-Age=2592000";
 		req->setCookie(req->m_user["cookie"].c_str());
-		msg_debug("Generate new session ID: %s", uu_str);
+		msg_debug("Generate new session ID: %s", uuid.c_str());
 	} else {
 		msg_debug("Got session ID: %s", sessionID);
 		req->m_user["sessionid"] = std::string(sessionID);
@@ -103,12 +96,12 @@ bool sessionMiddleware(Express* c, ExRequest* req) {
 /*!
  * \brief withAuth middleware.
  */
-bool withAuth(Express* c, ExRequest* req) {
+bool withAuth(ExRequest* req) {
 	std::string sid = req->m_user["sessionid"];
 	SessionData* s = m_sessions[sid];
 	if (s) {
 		/* Check expired */
-		if ((s->logged_in) && (s->expire > xx_time_get_time())) {
+		if ((s->logged_in) && (s->expire > express_get_time_s())) {
 			s->ping();
 			return true;
 		}
@@ -125,20 +118,20 @@ void SETUP_task(void* parameter)
 {
 	e.use("", sessionMiddleware);
 
-	e.get("api/info", [](Express* c, ExRequest* req) {
+	e.get("api/info", withAuth, [](ExRequest* req) {
 		req->json("[{\"k\": \"Serial number\", \"v\": 1},{\"k\": \"Firmware\", \"v\": \"ESP32 test v1.0.0\"} ]");
-	}, withAuth);
+	});
 
-	e.get("api/network", [](Express* c, ExRequest* req) {
+	e.get("api/network", withAuth, [](ExRequest* req) {
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
-	}, withAuth);
+	});
 	
-	e.get("api/log", [](Express* c, ExRequest* req) {
+	e.get("api/log", withAuth, [](ExRequest* req) {
 		req->json("[ {\"s\":1696851532,\"ms\":810,\"p\":1,\"x\":\"main\",\"y\":\"main\",\"z\":\"START\"},"
 			"{\"s\":1696851532,\"ms\":960,\"p\":0,\"x\":\"\",\"y\":\"\",\"z\":\"HW: ESP32 \"} ]");
-	}, withAuth);
+	});
 
-	e.post("api/login", [](Express* c, ExRequest* req) {
+	e.post("api/login", [](ExRequest* req) {
 		bool ok = false;
 		std::string json = req->readAll();
 		cJSON* j = cJSON_Parse(json.c_str());
@@ -160,7 +153,7 @@ void SETUP_task(void* parameter)
 		}
 	});
 
-	e.get("api/logout", [](Express* c, ExRequest* req) {
+	e.get("api/logout", [](ExRequest* req) {
 		std::string sid = req->m_user["sessionid"];
 		SessionData* s = m_sessions[sid];
 		if (s) {
@@ -171,7 +164,7 @@ void SETUP_task(void* parameter)
 
 	e.addStatic(www_filesystem);
 
-	e.on("test", [](Express* c, WSRequest* req, char* arg, int arg_len) {
+	e.on("test", [](WSRequest* req, char* arg, int arg_len) {
 		std::string s(arg, arg_len);
 		msg_debug("Got test value <%s>", s.c_str());
 		req->send(s.c_str());

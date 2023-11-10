@@ -40,32 +40,32 @@ Express e;
 
 void SETUP_task(void *parameter)
 {
-	e.get("api/info", [](Express* c, ExRequest* req) {
+	e.get("api/info", [](ExRequest* req) {
 		req->json("[{\"k\": \"Serial number\", \"v\": 1},{\"k\": \"Firmware\", \"v\": \"ESP32 test\"} ]");
 	});
-	e.get("api/network", [](Express* c, ExRequest* req) {
+	e.get("api/network", [](ExRequest* req) {
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
 	});
-	e.get("api/log", [](Express* c, ExRequest* req) {
+	e.get("api/log", [](ExRequest* req) {
 		req->json("[ {\"s\":1696851532,\"ms\":810,\"p\":1,\"x\":\"main\",\"y\":\"main\",\"z\":\"START\"},"
 		"{\"s\":1696851532,\"ms\":960,\"p\":0,\"x\":\"\",\"y\":\"\",\"z\":\"HW: ESP32 \"} ]");
 	});
 
 
-	e.get("test", [](Express* c, ExRequest* req) {
+	e.get("test", [](ExRequest* req) {
 		req->json("{ \"test\": true }");
 	});
-	e.get("test1", [](Express* c, ExRequest* req) {
+	e.get("test1", [](ExRequest* req) {
 		req->json("{ \"test1\": true }");
 	});
-	e.get("test2", [](Express* c, ExRequest* req) {
+	e.get("test2", [](ExRequest* req) {
 		req->json("{ \"test2\": true }");
 	});
-	e.get("test0", [](Express* c, ExRequest* req) {
+	e.get("test0", [](ExRequest* req) {
 		req->json("{ \"test0\": true }");
 	});
 
-	e.get("add/:id/:val", [](Express* c, ExRequest* req) {
+	e.get("add/:id/:val", [](ExRequest* req) {
 		char buf[1024];
 		int id = req->getParamInt("id");
 		int val = req->getParamInt("val");
@@ -75,7 +75,7 @@ void SETUP_task(void *parameter)
 	});
 
 	e.addStatic(www_filesystem);
-	e.on("test", [](Express* c, WSRequest* req, char* arg, int arg_len) {
+	e.on("test", [](WSRequest* req, char* arg, int arg_len) {
 		std::string s(arg, arg_len);
 		msg_debug("Got test value <%s>", s.c_str());
 		req->send(s.c_str());
