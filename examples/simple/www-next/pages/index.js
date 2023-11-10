@@ -36,6 +36,7 @@ function InfoPage({ }) {
             updateData(msg.data);
         } catch(e) {
             console.error(e);
+            if ((e.response) && (e.response.status === 401)) return;
             showNotification({
                 id: 'comerror',
 				autoClose: 10000,

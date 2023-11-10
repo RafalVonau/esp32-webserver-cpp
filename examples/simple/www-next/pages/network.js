@@ -169,6 +169,7 @@ function Network({}) {
 			loadData(res);
 			setLoading(false);
 		} catch(e) {
+			if ((e.response) && (e.response.status === 401)) return;
 			showNotification({
 				autoClose: 10000,
 				title: 'Communication error',
