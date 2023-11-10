@@ -16,6 +16,7 @@ import { X } from 'tabler-icons-react';
 import axios from 'axios';
 import { useRouter } from 'next/router';
 import { useState } from 'react';
+import { useHotkeys } from "@mantine/hooks";
 
 export default function AuthenticationTitle() {
     const form = useForm({
@@ -44,6 +45,14 @@ export default function AuthenticationTitle() {
         }
     }
 
+    useHotkeys([["Enter", () => login()]]);
+    
+    function detectEnterPress(e) {
+        if (e.code === "Enter") {
+            login();
+        }
+    }
+    
     return (
         <Container size={420} my={40}>
             <Title
@@ -57,10 +66,10 @@ export default function AuthenticationTitle() {
             </Text>
 
             <Paper withBorder shadow="md" p={30} mt={30} radius="md">
-                <TextInput label="User name" placeholder="Enter user name" required {...form.getInputProps('user')} />
-                <PasswordInput label="Password" placeholder="Enter password" required {...form.getInputProps('password')} />
+                <TextInput onKeyDown={detectEnterPress} label="User name" placeholder="Enter user name" required {...form.getInputProps('user')} />
+                <PasswordInput onKeyDown={detectEnterPress} label="Password" placeholder="Enter password" required {...form.getInputProps('password')} />
                 <Group position="apart" mt="lg">
-                    <Checkbox label="Remember me" />
+                    <Checkbox onKeyDown={detectEnterPress} label="Remember me" />
                 </Group>
                 <Button fullWidth mt="xl" onClick={login} loading={loading}>
                     Log in
