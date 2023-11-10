@@ -636,7 +636,7 @@ std::string Express::generateUUID()
 {
     uint32_t v[9];
     struct timeval tv;
-    std::string sid(44,0);
+    std::string sid(64,0);
     size_t olen = 0;
 
 	gettimeofday(&tv, NULL);
@@ -652,7 +652,9 @@ std::string Express::generateUUID()
     v[7] = esp_random();
     /* Dummy for pad*/
     v[8] = (uint32_t)this;
-    mbedtls_base64_encode((unsigned char *)&sid[0], 44, &olen, (const unsigned char *)&v[0], 33 );
+    mbedtls_base64_encode((unsigned char *)&sid[0], 64, &olen, (const unsigned char *)&v[0], 33 );
+    sid.resize(olen);
+    // msg_error("olen = %d, string len = %d, ssid = %s", olen, sid.length(), sid.c_str());
 	return sid;
 }
 
