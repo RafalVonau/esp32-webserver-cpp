@@ -58,6 +58,9 @@ static void reboot(void)
     esp_restart();
 }
 
+/*!
+ * \brief Get current time in seconds.
+ */
 time_t express_get_time_s() 
 {
 	struct timeval tv;
@@ -65,6 +68,9 @@ time_t express_get_time_s()
 	return tv.tv_sec;
 }
 
+/*!
+ * \brief Get current time in miliseconds.
+ */
 uint64_t express_get_time_ms() 
 {
     uint64_t r;
@@ -219,10 +225,9 @@ Express::Express()
 
     /* Generic API */
     get("api/mem", [](ExRequest* req) {
-        char resp_jsonb[256];
         /* Send JSON as response */
-        snprintf(resp_jsonb, 255, "{ \"free\": %d, \"reset\": %d }", esp_get_free_heap_size(), esp_reset_reason());
-        req->json((const char*)resp_jsonb, strlen(resp_jsonb));
+        std::string json = "{ \"free\": " + std::to_string(esp_get_free_heap_size()) + ",\"reset\": " + std::to_string(esp_reset_reason()) + " }";
+        req->json(json.c_str(), json.length());
     });
     get("api/restart", [](ExRequest* req) {
         req->json("{ \"ok\": true }");
