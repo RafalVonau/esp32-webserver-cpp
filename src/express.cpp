@@ -235,7 +235,9 @@ Express::Express()
         req->json("{ \"ok\": true }");
         reboot();
     });
-
+    get("api/ping", [](ExRequest* req) {
+        req->json("{ \"pong\": true }");
+    });
 #ifdef CONFIG_PM_PROFILING
     get("api/pm", [](ExRequest* req) {
         char* buf = (char*)::calloc(HTTP_CHUNK_SIZE, sizeof(char));

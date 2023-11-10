@@ -268,7 +268,7 @@ function Network({}) {
 					/* Wait for operation completed. */
 					await sleep(500);
 					try {
-						const r = await axios.get('api/firmware',  {timeout: 500});
+						const r = await axios.get('api/ping',  {timeout: 500});
 						break;
 					} catch(e) {
 						console.log(`Not yet...`);
