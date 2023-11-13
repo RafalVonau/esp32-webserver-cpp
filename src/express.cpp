@@ -1,9 +1,11 @@
 /*
- * Express www server.
- *
- * FAVICON: https://base64.guru/converter/encode/image/ico
+ * WebServer implementation.
  *
  * Author: Rafal Vonau <rafal.vonau@gmail.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -757,14 +759,17 @@ ExpressMidCB Express::getJsonMW()
     };
 }
 
-
-
-void Express::doLogin(ExRequest* req, std::string user)
+bool Express::doLogin(ExRequest* req, std::string user)
 {
     /* Create new session */
-    ExpressSession *s = new ExpressSession(user);
-    m_sessions[req->m_user["sessionid"]] = s;
-    req->m_session = s; 
+    std::string sid = req->m_user["sessionid"];
+    if (sid.length()) {
+        ExpressSession *s = new ExpressSession(user);
+        m_sessions[sid] = s;
+        req->m_session = s; 
+        return true;
+    }
+    return false;
 }
 
 void Express::doLogOut(ExRequest* req)
@@ -785,8 +790,6 @@ ExpressPageCB Express::getStdLoginFunction()
         req->m_e->doLogOut(req);
         if (!req->m_json_parsed) {
             /* JSON not parsed yet  */
-            std::string json = req->readAll();
-            msg_error("Login Parse json %s", json.c_str());
             req->m_json = nlohmann::json::parse(req->readAll());
             req->m_json_parsed = true;
         }
@@ -797,15 +800,15 @@ ExpressPageCB Express::getStdLoginFunction()
             auto k = this->m_passwd.find(user);
             if (k != this->m_passwd.end()) {
 		        if (k->second == std::string(password)) {
-			        ok = true;
-			        this->doLogin(req, user);
+			        ok = this->doLogin(req, user);
+			        
 		        }
             }
 	    }
 	    if (ok) {
 		    req->json("{ \"ok\": true}");
 	    } else {
-		    req->error(HTTPD_403_FORBIDDEN);
+		    req->error(HTTPD_401_UNAUTHORIZED);
 	    }
     };
 }

@@ -381,7 +381,7 @@ public:
     /* Buildin middlewares */
     ExpressMidCB getSessionMW(int maxAge = 2592000);
     ExpressMidCB getWithAuthMW();
-    void doLogin(ExRequest* req, std::string user);
+    bool doLogin(ExRequest* req, std::string user);
     void doLogOut(ExRequest* req);
 
     /* Std login */
