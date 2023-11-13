@@ -22,7 +22,8 @@
 #include <string>
 #include <list>
 #include <vector>
-#include "ArduinoJson.h"
+#include <json.hpp>
+// using json = nlohmann::json;
 
 struct www_file_t {
     const char *name;
@@ -96,7 +97,6 @@ typedef std::list<std::pair<const char*, ExpressMidCB> > ExpressMidMap;
 
 
 
-#define jso (*req->m_json)
 /*!
  * \brief HTTP Request/Response.
  */
@@ -114,7 +114,7 @@ public:
 #ifdef CONFIG_EXPRESS_USE_AUTH
         m_session = NULL;
 #endif
-        m_json = NULL;
+        m_json_parsed = false;
         parseURI();
     }
 
@@ -125,7 +125,6 @@ public:
         if (m_cookie_mem) ::free((void *)m_cookie_mem);
         if (m_param_mem) ::free((void *)m_param_mem);
         if (m_key_mem) ::free((void *)m_key_mem);
-        if (m_json) delete m_json;
     }
     const char* uri() const { return m_uri; }
     int getMethod() { return m_req->method; }
@@ -228,7 +227,8 @@ public:
     std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie.  */
     std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from path.    */
     std::map<std::string, std::string> m_user;                        /*!< Additional parameters.   */
-    DynamicJsonDocument *m_json;                                      /*!< Parsed JSON document.    */
+    nlohmann::json m_json;                                            /*!< Parsed JSON document.    */
+    bool           m_json_parsed;                                     /*!< JSON parsed flag.        */
 #ifdef CONFIG_EXPRESS_USE_AUTH
     ExpressSession *m_session;                                        /*!< Pointer to session data. */
 #endif

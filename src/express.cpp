@@ -751,12 +751,8 @@ ExpressMidCB Express::getJsonMW()
         if (req->getMethod() == HTTP_GET) return true;
         if (req->getContentLen() <= 0 ) return true;
         if (req->getContentType().find("json") == std::string::npos) return true;
-        {
-	        std::string json = req->readAll();
-            if (req->m_json) delete req->m_json;
-            req->m_json = new DynamicJsonDocument(4096);
-            deserializeJson(jso, json);
-        }
+        req->m_json = nlohmann::json::parse(req->readAll());
+        req->m_json_parsed = true;
 	    return true;
     };
 }
@@ -787,17 +783,16 @@ ExpressPageCB Express::getStdLoginFunction()
 	return [this](ExRequest* req) {
         bool ok = false;
         req->m_e->doLogOut(req);
-        if (!req->m_json) {
+        if (!req->m_json_parsed) {
             /* JSON not parsed yet  */
             std::string json = req->readAll();
             msg_error("Login Parse json %s", json.c_str());
-             if (req->m_json) delete req->m_json;
-            req->m_json = new DynamicJsonDocument(4096);
-            deserializeJson(*req->m_json, json);
+            req->m_json = nlohmann::json::parse(req->readAll());
+            req->m_json_parsed = true;
         }
-        const char* user = jso["user"];
-        const char* password = jso["password"];
-        if ((user) && (password)) {
+        std::string user = req->m_json["user"].get<std::string>();
+        std::string password = req->m_json["password"].get<std::string>();
+        if ((user.length()) && (password.length())) {
 		    /* Analize user password ... */
             auto k = this->m_passwd.find(user);
             if (k != this->m_passwd.end()) {
