@@ -56,7 +56,7 @@ bool sessionMiddleware(ExRequest* req) {
 /* Empty string "" = execute for any path */
 e.use("", sessionMiddleware);
 
-/* Add middleware in .get .post ... methods (maximum 3 middlewares) */
+/* Add middleware in .get .post ... methods  */
 
 bool withAuth(ExRequest* req) { .... }
 
@@ -64,6 +64,10 @@ e.get("api/secure", withAuth, [](ExRequest* req) {
     req->json("{ \"copy\": true }");
 });
 
+/* Add more middlewares in .get .post ... methods  */
+e.get("api/secure", {withAuth, json}, [](ExRequest* req) {
+    req->json("{ \"copy\": true }");
+});
 
 /* Get data from post request */
 e.post("api/login", [](ExRequest* req) {
