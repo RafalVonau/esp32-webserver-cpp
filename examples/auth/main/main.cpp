@@ -20,7 +20,6 @@
 #include "mdns.h"
 #include "protocol_examples_common.h"
 #include "www_fs.h"
-#include "cJSON.h"
 #include "ramlog.h"
 
 static char tag[] = "EXM";
@@ -40,127 +39,33 @@ static char tag[] = "EXM";
 Express e;
 
 
-#define INACTIVE_TIME_S (3600)
-class SessionData {
-public:
-	SessionData() { logged_in = false; }
-	SessionData(std::string n) { logged_in = true;  userName = n; expire = express_get_time_s() + INACTIVE_TIME_S; }
-	void ping() {
-		expire = express_get_time_s() + INACTIVE_TIME_S;
-	}
-	std::string userName;
-	time_t expire;
-	bool logged_in;
-};
-
-std::map<std::string, SessionData*> m_sessions;
-
-void cleanupOutdated()
-{
-	time_t v = express_get_time_s();
-	for (auto i = m_sessions.begin(); i != m_sessions.end();) {
-		auto j = i++;
-		SessionData* s = j->second;
-		if (s->expire < v) {
-			msg_debug("Delete outdated session %s", j->first.c_str());
-			m_sessions.erase(j);
-			delete s;
-		}
-	}
-}
-
-
-/*!
- * \brief Session middleware.
- */
-bool sessionMiddleware(ExRequest* req) {
-	const char* sessionID;
-
-	sessionID = req->getCookie("SessionID");
-	if (!sessionID) {
-		if ((strcmp(req->uri(), "login")) && (strcmp(req->uri(), "index.html"))) return true;
-		/* Cleanup outdated sessions */
-		cleanupOutdated();
-		/* Generate new session ID */
-		std::string uuid = req->m_e->generateUUID();
-		req->m_user["sessionid"] = uuid;
-		req->m_user["cookie"] = "SessionID=" + uuid + "; Max-Age=2592000";
-		req->setCookie(req->m_user["cookie"].c_str());
-		msg_debug("Generate new session ID: %s", uuid.c_str());
-	} else {
-		msg_debug("Got session ID: %s", sessionID);
-		req->m_user["sessionid"] = std::string(sessionID);
-	}
-	return true;
-}
-
-/*!
- * \brief withAuth middleware.
- */
-bool withAuth(ExRequest* req) {
-	std::string sid = req->m_user["sessionid"];
-	SessionData* s = m_sessions[sid];
-	if (s) {
-		/* Check expired */
-		if ((s->logged_in) && (s->expire > express_get_time_s())) {
-			s->ping();
-			return true;
-		}
-		/* Delete session */
-		m_sessions.erase(sid);
-		delete s;
-	}
-	req->error("401 Unauthorized");
-	return false;
-}
-
 
 void SETUP_task(void* parameter)
 {
-	e.use("", sessionMiddleware);
+	/* Use session */
+	e.use("", e.getSessionMW());
+	/* Use json MW */
+	e.use("", e.getJsonMW());
 
-	e.get("api/info", withAuth, [](ExRequest* req) {
+	auto withAuth = e.getWithAuthMW();
+
+	e.get("api/info", withAuth,  [](ExRequest* req) {
 		req->json("[{\"k\": \"Serial number\", \"v\": 1},{\"k\": \"Firmware\", \"v\": \"ESP32 test v1.0.0\"} ]");
 	});
-
 	e.get("api/network", withAuth, [](ExRequest* req) {
 		req->json("{\"ip\": \"192.168.124.227\", \"netmask\": \"255.255.255.0\", \"gateway\": \"\", \"dhcp\": \"STATIC\", \"ntp\": \"NONTP\", \"ntps\": \"\" }");
 	});
-	
 	e.get("api/log", [](ExRequest* req) {
 		req->txt(RAMLog::instance()->read().c_str());
 	});
-
-	e.post("api/login", [](ExRequest* req) {
-		bool ok = false;
-		std::string json = req->readAll();
-		cJSON* j = cJSON_Parse(json.c_str());
-		if ((cJSON_GetObjectItem(j, "user")) && (cJSON_GetObjectItem(j, "password"))) {
-			char* user = cJSON_GetObjectItem(j, "user")->valuestring;
-			char* password = cJSON_GetObjectItem(j, "password")->valuestring;
-			msg_debug("Got user = %s, pass = %s", user, password);
-			/* Analize user password ... */
-			if ((!strcmp(user, "admin")) && (!strcmp(password, "admin"))) {
-				ok = true;
-				m_sessions[req->m_user["sessionid"]] = new SessionData(user);
-			}
-		}
-		cJSON_Delete(j);
-		if (ok) {
-			req->json("{ \"ok\": true}");
-		} else {
-			req->error("403 Forbidden");
-		}
-	});
+	e.post("api/login", e.getStdLoginFunction());
 
 	e.get("api/logout", [](ExRequest* req) {
-		std::string sid = req->m_user["sessionid"];
-		SessionData* s = m_sessions[sid];
-		if (s) {
-			m_sessions.erase(sid);
-			delete s;
-		}
+		e.doLogOut(req);
+		req->json("{ \"ok\": true }");
 	});
+	e.addUser("admin", "admin");
+
 
 	e.addStatic(www_filesystem);
 

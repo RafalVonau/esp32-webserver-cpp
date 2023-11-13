@@ -29,7 +29,7 @@
 #include "mbedtls/base64.h"
 #include "bootloader_random.h"
 // #include "esp_httpd_priv.h"
-#include "cJSON.h"
+
 
 static const char* TAG = "Express";
 
@@ -737,10 +737,31 @@ ExpressMidCB Express::getWithAuthMW()
             req->m_session = NULL;
 		    delete s;
 	    }
-	    req->error("401 Unauthorized");
+	    req->error(HTTPD_401_UNAUTHORIZED);
 	    return false;
     };
 }
+
+/*!
+ * \brief withAuth middleware.
+ */
+ExpressMidCB Express::getJsonMW()
+{
+    return [this](ExRequest* req) {
+        if (req->getMethod() == HTTP_GET) return true;
+        if (req->getContentLen() <= 0 ) return true;
+        if (req->getContentType().find("json") == std::string::npos) return true;
+        {
+	        std::string json = req->readAll();
+            if (req->m_json) delete req->m_json;
+            req->m_json = new DynamicJsonDocument(4096);
+            deserializeJson(jso, json);
+        }
+	    return true;
+    };
+}
+
+
 
 void Express::doLogin(ExRequest* req, std::string user)
 {
@@ -765,12 +786,18 @@ ExpressPageCB Express::getStdLoginFunction()
 {
 	return [this](ExRequest* req) {
         bool ok = false;
-	    std::string json = req->readAll();
-	    cJSON *j = cJSON_Parse(json.c_str());
-	    if ((cJSON_GetObjectItem(j, "user")) && (cJSON_GetObjectItem(j, "password"))) {
-		    char *user = cJSON_GetObjectItem(j,"user")->valuestring;
-		    char *password = cJSON_GetObjectItem(j,"password")->valuestring;
-		    msg_debug("Got user = %s, pass = %s", user, password);
+        req->m_e->doLogOut(req);
+        if (!req->m_json) {
+            /* JSON not parsed yet  */
+            std::string json = req->readAll();
+            msg_error("Login Parse json %s", json.c_str());
+             if (req->m_json) delete req->m_json;
+            req->m_json = new DynamicJsonDocument(4096);
+            deserializeJson(*req->m_json, json);
+        }
+        const char* user = jso["user"];
+        const char* password = jso["password"];
+        if ((user) && (password)) {
 		    /* Analize user password ... */
             auto k = this->m_passwd.find(user);
             if (k != this->m_passwd.end()) {
@@ -780,11 +807,10 @@ ExpressPageCB Express::getStdLoginFunction()
 		        }
             }
 	    }
-	    cJSON_Delete(j);
 	    if (ok) {
 		    req->json("{ \"ok\": true}");
 	    } else {
-		    req->error("403 Forbidden");
+		    req->error(HTTPD_403_FORBIDDEN);
 	    }
     };
 }
@@ -867,6 +893,26 @@ const static char http_pragma_no_cache[] = "no-cache";
 const static char http_content_type_txt[] = "text/plain";
 const static char http_set_cookie[] = "Set-Cookie";
 const static char http_cookie[] = "Cookie";
+const static char http_content_type[] = "Content-Type";
+
+
+std::string ExRequest::getHeader(const char *key) const
+{
+    size_t len;
+    len = httpd_req_get_hdr_value_len(m_req, key);    
+    if (len > 0) {    
+        std::string res(len, 0);
+        httpd_req_get_hdr_value_str(m_req, key, &res[0], len + 1);
+        return res;
+    }
+    return std::string();  
+}
+
+std::string ExRequest::getContentType() const
+{
+    return getHeader(http_content_type);
+}
+
 
 void ExRequest::setCookie(const char* cookie)
 {
@@ -934,6 +980,7 @@ void ExRequest::parseCookie()
     }
 }
 
+
 void ExRequest::parseParams()
 {
     m_param.clear();
@@ -996,12 +1043,12 @@ esp_err_t ExRequest::send_res(esp_err_t ret)
     }
 }
 
-esp_err_t ExRequest::error(const char *status)
-{
-    httpd_resp_set_status(m_req, status);
-    httpd_resp_set_type(m_req, http_content_type_txt);
-    return httpd_resp_send(m_req, NULL, 0);
-}
+// esp_err_t ExRequest::error(const char *status)
+// {
+//     httpd_resp_set_status(m_req, status);
+//     httpd_resp_set_type(m_req, http_content_type_txt);
+//     return httpd_resp_send(m_req, NULL, 0);
+// }
 
 
 esp_err_t ExRequest::gzip(const char* type, const char* resp, int len)

@@ -21,6 +21,8 @@
 #include <map>
 #include <string>
 #include <list>
+#include <vector>
+#include "ArduinoJson.h"
 
 struct www_file_t {
     const char *name;
@@ -71,6 +73,8 @@ typedef std::function<void(ExRequest* req)> ExpressPageCB;
  * \return true - process next middleware or page, false - break processing.
  */
 typedef std::function<bool(ExRequest* req)> ExpressMidCB;
+typedef const std::vector<ExpressMidCB> ExpressMidCBList;
+
 /*!
  * \brief WebSocket callback.
  * \param c - pointer to Express class,
@@ -91,6 +95,8 @@ typedef std::list<std::pair<const char*, ExpressPageCB> > ExpressPgList;
 typedef std::list<std::pair<const char*, ExpressMidCB> > ExpressMidMap;
 
 
+
+#define jso (*req->m_json)
 /*!
  * \brief HTTP Request/Response.
  */
@@ -108,6 +114,7 @@ public:
 #ifdef CONFIG_EXPRESS_USE_AUTH
         m_session = NULL;
 #endif
+        m_json = NULL;
         parseURI();
     }
 
@@ -118,8 +125,10 @@ public:
         if (m_cookie_mem) ::free((void *)m_cookie_mem);
         if (m_param_mem) ::free((void *)m_param_mem);
         if (m_key_mem) ::free((void *)m_key_mem);
+        if (m_json) delete m_json;
     }
     const char* uri() const { return m_uri; }
+    int getMethod() { return m_req->method; }
 
     void setKey(const char *key) { m_key = key; }
 
@@ -166,6 +175,8 @@ public:
 
     /* Read data (from post for example) */
     int getContentLen() const { return m_req->content_len; }
+    std::string getHeader(const char *key) const;
+    std::string getContentType() const;
     std::string readAll() {
         int len = m_req->content_len;
         std::string res(len, 0);
@@ -186,7 +197,19 @@ public:
     esp_err_t gzip(const char* type, const char* resp, int len = 0);
     esp_err_t send(const char* type, const char* resp, int len);
     esp_err_t send_res(esp_err_t ret);
-    esp_err_t error(const char *status);
+    esp_err_t error(httpd_err_code_t error, const char *msg = NULL) { return httpd_resp_send_err(m_req, error, msg); }
+    /* Low level versions */
+    esp_err_t setStatus(const char *status) { return httpd_resp_set_status(m_req, status); }
+    esp_err_t setType(const char *type) { return httpd_resp_set_type(m_req, type); }
+    esp_err_t setHeader(const char *key, const char *val) { return httpd_resp_set_hdr(m_req, key, val); }
+    esp_err_t sendAll(const char* buf, int buf_len) {return httpd_resp_send(m_req, buf, buf_len); }
+    /*!
+     * \brief Send in chunks. When you are finished sending all your chunks, you must call
+     *   this function with buf_len as 0.
+     */
+    esp_err_t sendChunk(const char* buf, int buf_len) { return httpd_resp_send_chunk(m_req, buf, buf_len); }
+    
+
 
     /* Redirect to another location */
     esp_err_t redirect(const char *path, const char *type = "302 Found");
@@ -203,8 +226,9 @@ public:
     const char *m_uri, *m_key;
     std::map<const char*, const char*, ExRequest_cmp_str> m_query;    /*!< Parameters from query.   */
     std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie.  */
-    std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from uri.     */
+    std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from path.    */
     std::map<std::string, std::string> m_user;                        /*!< Additional parameters.   */
+    DynamicJsonDocument *m_json;                                      /*!< Parsed JSON document.    */
 #ifdef CONFIG_EXPRESS_USE_AUTH
     ExpressSession *m_session;                                        /*!< Pointer to session data. */
 #endif
@@ -258,10 +282,10 @@ public:
 		expire = express_get_time_s() + sessionTimeout; 
 	}
 public:
-    int sessionTimeout;                          /*!< Session inactivity timeout in seconds. */
-	std::string userName;                        /*!< Logged user name.                      */
-	time_t expire;                               /*!< Timestam when the session will expire. */
-    std::map<std::string, std::string> m_user;   /*!< Additional parameters.                 */
+    int sessionTimeout;                          /*!< Session inactivity timeout in seconds.  */
+	std::string userName;                        /*!< Logged user name.                       */
+	time_t expire;                               /*!< Timestamp when the session will expire. */
+    std::map<std::string, std::string> m_user;   /*!< Additional parameters.                  */
 };
 
 #endif
@@ -328,22 +352,13 @@ public:
     void put(const char* path, ExpressMidCB m, ExpressPageCB cb)   { put(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
     void all(const char* path, ExpressMidCB m, ExpressPageCB cb)   { all(path, [cb, m](ExRequest* r)   { if (m(r)) cb(r); }); }
         
-    /* Middleware x 2 */
-    void get(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { get(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
-    void post(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)  { post(path,[cb,m,m1](ExRequest* r)  { if (m(r) && m1(r)) cb(r); }); }
-    void del(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { del(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
-    void patch(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb) { patch(path,[cb,m,m1](ExRequest* r) { if (m(r) && m1(r)) cb(r); }); }
-    void put(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { put(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
-    void all(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressPageCB cb)   { all(path,[cb,m,m1](ExRequest* r)   { if (m(r) && m1(r)) cb(r); }); }
-
-    /* Middleware x 3 */
-    void get(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { get(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-    void post(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)  { post(path,[cb,m,m1,m2](ExRequest* r)  { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-    void del(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { del(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-    void patch(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb) { patch(path,[cb,m,m1,m2](ExRequest* r) { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-    void put(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { put(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-    void all(const char* path,ExpressMidCB m,ExpressMidCB m1,ExpressMidCB m2,ExpressPageCB cb)   { all(path,[cb,m,m1,m2](ExRequest* r)   { if (m(r) && m1(r) && m2(r)) cb(r); }); }
-
+    /* List of Middlewares like .get("path", {middlewareFunction0, middlewareFunction1}, [] ... );  */
+    void get(const char* path,ExpressMidCBList &l,ExpressPageCB cb)   { get(path,[cb,l](ExRequest* r)   {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
+    void post(const char* path,ExpressMidCBList &l,ExpressPageCB cb)  { post(path,[cb,l](ExRequest* r)  {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
+    void del(const char* path,ExpressMidCBList &l,ExpressPageCB cb)   { del(path,[cb,l](ExRequest* r)   {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
+    void patch(const char* path,ExpressMidCBList &l,ExpressPageCB cb) { patch(path,[cb,l](ExRequest* r) {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
+    void put(const char* path,ExpressMidCBList &l,ExpressPageCB cb)   { put(path,[cb,l](ExRequest* r)   {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
+    void all(const char* path,ExpressMidCBList &l,ExpressPageCB cb)   { all(path,[cb,l](ExRequest* r)   {for (const auto& f : l) if (!f(r)) return; cb(r); }); }
 
     /* Websocket events */
     void onWS(ExpressWSCB w) { m_wsCB = w; }
@@ -358,6 +373,7 @@ public:
 
     std::string generateUUID();
 
+    ExpressMidCB getJsonMW();
 #ifdef CONFIG_EXPRESS_USE_AUTH
     /* Session helper */
     void cleanupOutdatedSessions();
