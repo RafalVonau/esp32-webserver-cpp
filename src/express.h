@@ -114,7 +114,6 @@ public:
 #ifdef CONFIG_EXPRESS_USE_AUTH
         m_session = NULL;
 #endif
-        m_json_parsed = false;
         parseURI();
     }
 
@@ -189,7 +188,7 @@ public:
     }
 
     /* Write answer */
-    esp_err_t json(nlohmann::json v) { std::string x = nlohmann::to_string(v); return json(x); }
+    esp_err_t json(nlohmann::json v);
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
@@ -229,7 +228,6 @@ public:
     std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from path.    */
     std::map<std::string, std::string> m_user;                        /*!< Additional parameters.   */
     nlohmann::json m_json;                                            /*!< Parsed JSON document.    */
-    bool           m_json_parsed;                                     /*!< JSON parsed flag.        */
 #ifdef CONFIG_EXPRESS_USE_AUTH
     ExpressSession *m_session;                                        /*!< Pointer to session data. */
 #endif

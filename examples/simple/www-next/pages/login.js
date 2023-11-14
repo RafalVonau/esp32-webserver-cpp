@@ -32,6 +32,7 @@ export default function AuthenticationTitle() {
     async function login() {
         setLoading(true);
         try {
+            const { sn } = await axios.get('/sn');
             const { data } = await axios.post('/api/login', { user: form.values.user, password: form.values.password });
             router.push('/');
         } catch (error) {

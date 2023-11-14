@@ -240,6 +240,9 @@ Express::Express()
     get("api/ping", [](ExRequest* req) {
         req->json("{ \"pong\": true }");
     });
+    get("sn", [](ExRequest* req) {
+        req->json("{ \"sn\": true }");
+    });
 #ifdef CONFIG_PM_PROFILING
     get("api/pm", [](ExRequest* req) {
         char* buf = (char*)::calloc(HTTP_CHUNK_SIZE, sizeof(char));
@@ -684,11 +687,16 @@ void Express::cleanupOutdatedSessions()
 	for (auto i = m_sessions.begin(); i != m_sessions.end();) {
 		auto j = i++;
 		ExpressSession *s = j->second;
-		if (s->expire < v ) {
-			msg_debug("Delete outdated session %s", j->first.c_str());
+		if (s) {
+            if (s->expire < v ) {
+			    msg_debug("Delete outdated session %s", j->first.c_str());
+			    m_sessions.erase(j);
+			    delete s;
+            }
+		} else {
+			msg_debug("Delete empty session %s", j->first.c_str());
 			m_sessions.erase(j);
-			delete s;
-		}
+        }
 	}
 }
 //===========================================================================
@@ -701,7 +709,7 @@ ExpressMidCB Express::getSessionMW(int maxAge)
 
 	    sessionID = req->getCookie("SessionID");
 	    if (!sessionID) {
-            if ((strcmp(req->uri(),"login")) && (strcmp(req->uri(),"index.html"))) return true;
+            if ((strcmp(req->uri(),"login")) && (strcmp(req->uri(),"sn")) && (strcmp(req->uri(),"index.html"))) return true;
 		    /* Cleanup outdated sessions */
 		    this->cleanupOutdatedSessions();
 		    /* Generate new session ID */
@@ -753,8 +761,11 @@ ExpressMidCB Express::getJsonMW()
         if (req->getMethod() == HTTP_GET) return true;
         if (req->getContentLen() <= 0 ) return true;
         if (req->getContentType().find("json") == std::string::npos) return true;
-        req->m_json = nlohmann::json::parse(req->readAll());
-        req->m_json_parsed = true;
+        try {
+            req->m_json = nlohmann::json::parse(req->readAll());
+        } catch (const nlohmann::json::exception& e) {
+		    msg_error("%s", e.what());
+	    }
 	    return true;
     };
 }
@@ -787,14 +798,22 @@ ExpressPageCB Express::getStdLoginFunction()
 {
 	return [this](ExRequest* req) {
         bool ok = false;
+        std::string user,password;
         req->m_e->doLogOut(req);
-        if (!req->m_json_parsed) {
+        if (req->m_json.is_null()) {
             /* JSON not parsed yet  */
-            req->m_json = nlohmann::json::parse(req->readAll());
-            req->m_json_parsed = true;
+            try {
+                req->m_json = nlohmann::json::parse(req->readAll());
+            } catch (const njson::exception& e) {
+		        msg_error("%s", e.what());
+	        }
         }
-        std::string user = req->m_json["user"].get<std::string>();
-        std::string password = req->m_json["password"].get<std::string>();
+        try {
+            user = req->m_json["user"].get<std::string>();
+            password = req->m_json["password"].get<std::string>();
+        } catch (const njson::exception& e) {
+		    msg_error("%s", e.what());
+	    }
         if ((user.length()) && (password.length())) {
 		    /* Analize user password ... */
             auto k = this->m_passwd.find(user);
@@ -1011,6 +1030,16 @@ void ExRequest::parseParams()
     }
 }
 
+esp_err_t ExRequest::json(nlohmann::json v) 
+{ 
+    try {
+        std::string x = nlohmann::to_string(v); 
+        return json(x); 
+    } catch (const njson::exception& e) {
+		msg_error("%s", e.what());
+        return ESP_FAIL;
+	}
+}
 
 esp_err_t ExRequest::json(const char* resp, int len)
 {
