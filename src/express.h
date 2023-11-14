@@ -23,7 +23,7 @@
 #include <list>
 #include <vector>
 #include <json.hpp>
-// using json = nlohmann::json;
+using njson = nlohmann::json;
 
 struct www_file_t {
     const char *name;
@@ -189,6 +189,7 @@ public:
     }
 
     /* Write answer */
+    esp_err_t json(nlohmann::json v) { std::string x = nlohmann::to_string(v); return json(x); }
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
