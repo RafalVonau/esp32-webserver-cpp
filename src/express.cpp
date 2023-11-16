@@ -256,6 +256,25 @@ Express::Express()
         }
     });
 #endif
+    get("api/tasks", [](ExRequest* req) {
+        std::string ret;
+        const size_t bytes_per_task = 40; /* see vTaskList description */
+        char *task_list_buffer = (char *)malloc(uxTaskGetNumberOfTasks() * bytes_per_task);
+        if (task_list_buffer == NULL) {
+            msg_error("failed to allocate buffer for vTaskList output");
+            return;
+        }
+#ifdef CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID
+        ret = "Task Name\tStatus\tPrio\tHWM\tTask#\tAffinity\n";
+#else
+        ret = "Task Name\tStatus\tPrio\tHWM\tTask#\n";
+#endif
+        vTaskList(task_list_buffer);
+        ret += std::string(task_list_buffer);
+        free(task_list_buffer);
+        req->txt((const char*)ret.c_str(), ret.length());
+    });
+
     /* OTA */
     post("ota", [](ExRequest* req) { req->m_e->ota_post_handler(req->m_req); });
 }
@@ -351,6 +370,7 @@ void Express::start(int port, uint8_t pr, BaseType_t coreID)
 
 
 const static char http_404_hdr[] = "404 Not Found";
+const static char http_401_hdr[] = "401 Unauthorized";
 
 /*!
  * \brief Handle GET (HTML/CSS/JS/JSON code).
@@ -747,28 +767,12 @@ ExpressMidCB Express::getWithAuthMW()
             req->m_session = NULL;
 		    delete s;
 	    }
-	    req->error(HTTPD_401_UNAUTHORIZED);
+	    req->error(http_401_hdr);
 	    return false;
     };
 }
 
-/*!
- * \brief withAuth middleware.
- */
-ExpressMidCB Express::getJsonMW()
-{
-    return [this](ExRequest* req) {
-        if (req->getMethod() == HTTP_GET) return true;
-        if (req->getContentLen() <= 0 ) return true;
-        if (req->getContentType().find("json") == std::string::npos) return true;
-        try {
-            req->m_json = nlohmann::json::parse(req->readAll());
-        } catch (const nlohmann::json::exception& e) {
-		    msg_error("%s", e.what());
-	    }
-	    return true;
-    };
-}
+
 
 bool Express::doLogin(ExRequest* req, std::string user)
 {
@@ -802,37 +806,45 @@ ExpressPageCB Express::getStdLoginFunction()
         req->m_e->doLogOut(req);
         if (req->m_json.is_null()) {
             /* JSON not parsed yet  */
-            try {
-                req->m_json = nlohmann::json::parse(req->readAll());
-            } catch (const njson::exception& e) {
-		        msg_error("%s", e.what());
-	        }
+            req->m_json = njson::parse(req->readAll().c_str());
         }
-        try {
-            user = req->m_json["user"].get<std::string>();
-            password = req->m_json["password"].get<std::string>();
-        } catch (const njson::exception& e) {
-		    msg_error("%s", e.what());
-	    }
+        // msg_error("%s\n", req->m_json.dump().c_str() );
+        user = req->m_json["user"].getString();
+        password = req->m_json["password"].getString();
+        // msg_error("%s %s\n", user.c_str(), password.c_str() );
         if ((user.length()) && (password.length())) {
 		    /* Analize user password ... */
             auto k = this->m_passwd.find(user);
             if (k != this->m_passwd.end()) {
 		        if (k->second == std::string(password)) {
 			        ok = this->doLogin(req, user);
-			        
 		        }
             }
 	    }
 	    if (ok) {
 		    req->json("{ \"ok\": true}");
 	    } else {
-		    req->error(HTTPD_401_UNAUTHORIZED);
+		    req->error(http_401_hdr);
 	    }
     };
 }
 
 #endif
+
+/*!
+ * \brief JSON middleware.
+ */
+ExpressMidCB Express::getJsonMW()
+{
+    return [this](ExRequest* req) {
+        if (req->getMethod() == HTTP_GET) return true;
+        if (req->getContentLen() <= 0 ) return true;
+        if (req->getContentType().find("json") == std::string::npos) return true;
+        req->m_json = njson::parse(req->readAll().c_str());
+	    return true;
+    };
+}
+
 
 //===========================================================================
 //======================--- Request/Response  ---============================
@@ -1030,16 +1042,13 @@ void ExRequest::parseParams()
     }
 }
 
-esp_err_t ExRequest::json(nlohmann::json v) 
+
+esp_err_t ExRequest::json(njson v) 
 { 
-    try {
-        std::string x = nlohmann::to_string(v); 
-        return json(x); 
-    } catch (const njson::exception& e) {
-		msg_error("%s", e.what());
-        return ESP_FAIL;
-	}
+    std::string s = v.dump();
+    return json(s.c_str(), s.length()); 
 }
+
 
 esp_err_t ExRequest::json(const char* resp, int len)
 {
@@ -1070,12 +1079,12 @@ esp_err_t ExRequest::send_res(esp_err_t ret)
     }
 }
 
-// esp_err_t ExRequest::error(const char *status)
-// {
-//     httpd_resp_set_status(m_req, status);
-//     httpd_resp_set_type(m_req, http_content_type_txt);
-//     return httpd_resp_send(m_req, NULL, 0);
-// }
+esp_err_t ExRequest::error(const char *status)
+{
+    httpd_resp_set_status(m_req, status);
+    httpd_resp_set_type(m_req, http_content_type_txt);
+    return httpd_resp_send(m_req, NULL, 0);
+}
 
 
 esp_err_t ExRequest::gzip(const char* type, const char* resp, int len)

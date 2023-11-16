@@ -20,7 +20,7 @@ e.get("api/add/:id/:val", [](ExRequest* req) {
   int id = req->getParamInt("id");
   int val = req->getParamInt("val");
   // .. do something with id and val
-  req->json({{"ok", true}, {"id", id}, {"val", val}});
+  req->json({"ok", true, "id", id, "val", val});
 });
 
 /* Ignore section (use *) /api/[anything]/move */

@@ -22,8 +22,9 @@
 #include <string>
 #include <list>
 #include <vector>
-#include <json.hpp>
-using njson = nlohmann::json;
+#include <exjson.hpp>
+
+using njson = ExJSON::ExJSONVal;
 
 struct www_file_t {
     const char *name;
@@ -188,7 +189,7 @@ public:
     }
 
     /* Write answer */
-    esp_err_t json(nlohmann::json v);
+    esp_err_t json(njson v);
     esp_err_t json(const char* resp, int len = 0);
     esp_err_t json(std::string& s) { return json(s.c_str(), s.length()); }
     esp_err_t txt(const char* resp, int len = 0);
@@ -196,7 +197,7 @@ public:
     esp_err_t gzip(const char* type, const char* resp, int len = 0);
     esp_err_t send(const char* type, const char* resp, int len);
     esp_err_t send_res(esp_err_t ret);
-    esp_err_t error(httpd_err_code_t error, const char *msg = NULL) { return httpd_resp_send_err(m_req, error, msg); }
+    esp_err_t error(const char *);
     /* Low level versions */
     esp_err_t setStatus(const char *status) { return httpd_resp_set_status(m_req, status); }
     esp_err_t setType(const char *type) { return httpd_resp_set_type(m_req, type); }
@@ -227,7 +228,7 @@ public:
     std::map<const char*, const char*, ExRequest_cmp_str> m_cookie;   /*!< Parameters from cookie.  */
     std::map<const char*, const char*, ExRequest_cmp_str> m_param;    /*!< Parameters from path.    */
     std::map<std::string, std::string> m_user;                        /*!< Additional parameters.   */
-    nlohmann::json m_json;                                            /*!< Parsed JSON document.    */
+    njson m_json;                                                     /*!< Parsed JSON document.    */
 #ifdef CONFIG_EXPRESS_USE_AUTH
     ExpressSession *m_session;                                        /*!< Pointer to session data. */
 #endif
@@ -371,7 +372,6 @@ public:
     }
 
     std::string generateUUID();
-
     ExpressMidCB getJsonMW();
 #ifdef CONFIG_EXPRESS_USE_AUTH
     /* Session helper */
