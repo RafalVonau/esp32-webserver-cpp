@@ -41,12 +41,21 @@ typedef enum {
 	ExJSONValObject
 } ExJSONValType;
 
+union ExJSONDataUnion {
+	ExJSONValVec *v;
+	ExJSONValMap *m;
+	std::string  *s;
+	double        d;
+	long          i;
+	bool          b;
+};
+
+
 class ExJSONData {
 public:
 	ExJSONData() {
 		m_type = ExJSONValNull;
-		m_len = 0;
-		m_value = NULL;
+		m_u.v = NULL;
 		exjson_debug("ExJSONData constructor %d\n", this);
 	}
 	~ExJSONData() {
@@ -60,20 +69,14 @@ public:
 	 */
 	void alloc(ExJSONValType t) {
 		if (m_type == t) return; /* Do not alloc on the same type */
-		if (m_value) clear();    /* Clear if value is set         */
+		clear();    /* Clear if value is set         */
 		m_type = t;
 		switch (m_type) {
-			case ExJSONValArray:  {m_value=new ExJSONValVec(); exjson_debug("Allocate memory for Array %d\n", m_value); } break;
-			case ExJSONValObject: {m_value=new ExJSONValMap(); exjson_debug("Allocate memory for Object %d\n", m_value);} break;
-			case ExJSONValDouble: {m_len=sizeof(double); m_value = malloc(m_len); exjson_debug("Allocate memory for double %d\n", m_value); } break;
-			case ExJSONValString: {
-				m_len = 1;
-				m_value = malloc(m_len);
-				((char *)m_value)[0] = '\0';
-				exjson_debug("Allocate memory for string %d\n", m_value);
-			} break;
-				/* Do not need to allocate anything */
-			default: { m_value = NULL; m_len   = 0; } break;
+			case ExJSONValArray:  {m_u.v = new ExJSONValVec(); exjson_debug("Allocate memory for Array %d\n", this); } break;
+			case ExJSONValObject: {m_u.m = new ExJSONValMap(); exjson_debug("Allocate memory for Object %d\n", this);} break;
+			case ExJSONValString: {m_u.s = new std::string(); exjson_debug("Allocate memory for String %d\n", this);} break;
+			/* Do not need to allocate anything */
+			default: { m_u.v = NULL; } break;
 		}
 	}
 
@@ -84,29 +87,32 @@ public:
 	void copy(const ExJSONDataPtr &t) {
 		clear();    /* Clear if value is set    */
 		m_type = t->m_type;
-		m_len  = t->m_len;
 		switch (m_type) {
 			case ExJSONValArray: {
-				ExJSONValVec *v = (ExJSONValVec *)t->m_value;
-				m_value = new ExJSONValVec(*v);
-				exjson_debug("Copy array %d, %d\n", t->m_value, m_value);
+				m_u.v = new ExJSONValVec(*(t->m_u.v));
+				exjson_debug("Copy array %d, %d\n", t, this);
 			} break;
 			case ExJSONValObject: {
-				ExJSONValMap *v = (ExJSONValMap *)t->m_value;
-				m_value = new ExJSONValMap(*v);
-				exjson_debug("Copy object %d, %d\n", t->m_value, m_value);
+				m_u.m = new ExJSONValMap(*(t->m_u.m));
+				exjson_debug("Copy object %d, %d\n", t, this);
 			} break;
-			case ExJSONValInt:
+			case ExJSONValString: {
+				m_u.s = new std::string(*(t->m_u.s));
+				exjson_debug("Copy string %d, %d\n", t, this);
+			} break;
+			case ExJSONValInt: {
+				m_u.i = t->m_u.i;
+				exjson_debug("Copy int %d, %d\n", t, this);
+			} break;
 			case ExJSONValBool: {
-				m_value = NULL;
-				exjson_debug("Copy int/bool %d, %d\n", t->m_len, m_len);
+				m_u.b = t->m_u.b;
+				exjson_debug("Copy bool %d, %d\n", t, this);
 			} break;
-			default: {
-				/* COPY string/double */
-				m_value = malloc(m_len);
-				memcpy(m_value, t->m_value, m_len);
-				exjson_debug("Copy string/double %d, %d\n", t->m_value, m_value);
+			case ExJSONValDouble: {
+				m_u.d = t->m_u.d;
+				exjson_debug("Copy double %d, %d\n", t, this);
 			} break;
+			case ExJSONValNull: break;
 		}
 	}
 
@@ -114,87 +120,81 @@ public:
 	 * \brief Cleanup memory.
 	 */
 	void clear() {
-		if (m_value) {
+		if (m_u.v) {
 			if (m_type == ExJSONValArray) {
 				exjson_debug("Cleanup memory: Array\n");
-				ExJSONValVec *v = (ExJSONValVec *)m_value;
-				delete v;
+				delete m_u.v;
 			} else if (m_type == ExJSONValObject) {
 				exjson_debug("Cleanup memory: Object\n");
-				ExJSONValMap *v = (ExJSONValMap *)m_value;
-				delete v;
-			} else if ((m_type == ExJSONValInt) || (m_type == ExJSONValBool)) {
-				/* Do not need to clean anything */
+				delete m_u.m;
+			} else if (m_type == ExJSONValString) {
+				exjson_debug("Cleanup memory: String\n");
+				delete m_u.s;
 			} else {
-				exjson_debug("Cleanup memory: string/double\n");
-				/* free string/double */
-				::free(m_value);
+				/* Do not need to clean anything */
 			}
 		}
 		/* Set as NULL */
 		m_type = ExJSONValNull;
-		m_len = 0;
-		m_value = NULL;
+		m_u.v = NULL;
 	}
 
 	/* Int */
-	void setInt(const int &i) {alloc(ExJSONValInt); m_len = i; }
-	int getInt() const {
-		if ((m_type == ExJSONValInt) || (m_type == ExJSONValBool))  return m_len;   /* Native value        */
-		else if (m_type == ExJSONValDouble) return ::round((*((double*)m_value)));  /* Round to integer    */
-		else if (m_type == ExJSONValString) return atoi(((const char*)m_value));    /* Try to parse string */
+	void setInt(const long &i) {alloc(ExJSONValInt); m_u.i = i; }
+	long getInt() const {
+		if ((m_type == ExJSONValInt) || (m_type == ExJSONValBool)) return m_u.i;   /* Native value        */
+		else if (m_type == ExJSONValDouble) return ::round(m_u.d);                 /* Round to integer    */
+		else if (m_type == ExJSONValString) return std::stol(*m_u.s);              /* Try to parse string */
 		return 0;
 	}
 
 	/* Bool */
-	void setBool(const bool &i) {alloc(ExJSONValBool); m_len = (int)i; }
+	void setBool(const bool &i) {alloc(ExJSONValBool); m_u.b = i; }
 	bool getBool() const {
-		if ((m_type == ExJSONValBool) || (m_type == ExJSONValInt)) return ((bool)m_len);
+		if ((m_type == ExJSONValBool) || (m_type == ExJSONValInt)) return (m_u.b);
 		return false;
 	}
 
 	/* Double */
-	void setDouble(const double &i) {alloc(ExJSONValDouble); *((double *)m_value) = i; }
+	void setDouble(const double &i) {alloc(ExJSONValDouble); m_u.d = i; }
 	double getDouble() const {
-		if (m_type == ExJSONValDouble) return (*((double*)m_value));               /* Native value          */
-		else if (m_type == ExJSONValInt) return (double)((int)(long long)m_value); /* Convert int to double */
-		else if (m_type == ExJSONValString) return atof(((const char*)m_value));   /* Try to parse string   */
+		if (m_type == ExJSONValDouble) return m_u.d;                    /* Native value          */
+		else if (m_type == ExJSONValInt) return (double)(m_u.i);        /* Convert int to double */
+		else if (m_type == ExJSONValString) return std::stod(*m_u.s);   /* Try to parse string   */
 		return 0.0;
 	}
 
 	/* String */
-	void setString(const char *v, int len = -1) {
-		if (len <= 0) len = strlen(v);
-		clear();
-		m_len = len + 1;
-		m_type = ExJSONValString;
-		m_value = malloc(m_len);
-		memcpy(m_value, v, len);
-		((char *)m_value)[len] = '\0';
-		exjson_debug("Alloc string - copy %d, %s\n", m_value, v);
+	void setString(const std::string &s) {
+		alloc(ExJSONValString);
+		*m_u.s = s;
+	}
+
+	/* CString */
+	void setCString(const char *&s, int &len) {
+		if (len < 0) len = strlen(s);
+		alloc(ExJSONValString);
+		*m_u.s = std::string(s, len);
 	}
 
 	/* Array */
 	void setArray(const ExJSONValVec &s) {
 		clear();
 		m_type = ExJSONValArray;
-		m_len = sizeof(ExJSONValArray);
-		m_value = new ExJSONValVec(s);
-		exjson_debug("Alloc Array - copy %d\n", m_value);
+		m_u.v = new ExJSONValVec(s);
+		exjson_debug("Alloc Array - copy %d\n", this);
 	}
 
 	/* Object */
 	void setObject(ExJSONValMap &s) {
 		clear();
 		m_type = ExJSONValObject;
-		m_len = sizeof(ExJSONValMap);
-		m_value = new ExJSONValMap(s);
+		m_u.m = new ExJSONValMap(s);
 	}
 
 public:
-	ExJSONValType m_type;
-	void         *m_value;
-	int           m_len;
+	ExJSONValType   m_type;
+	ExJSONDataUnion m_u;
 };
 
 
@@ -204,19 +204,20 @@ public:
 	/*!
 	 * \brief Constructors.
 	 */
-	ExJSONVal() { d = std::make_shared<ExJSONData>(); }
-	ExJSONVal(ExJSONValType t) { d = std::make_shared<ExJSONData>(); d->alloc(t); }
-	ExJSONVal(const ExJSONVal &t) { exjson_debug("Clone pointer (constructor)\n"); d = t.d; }
-	ExJSONVal(int v)   {d = std::make_shared<ExJSONData>(); d->setInt(v);    }
-	ExJSONVal(bool v)  {d = std::make_shared<ExJSONData>(); d->setBool(v);   }
-	ExJSONVal(double v){d = std::make_shared<ExJSONData>(); d->setDouble(v); }
-	ExJSONVal(const char *v, int len = -1) {
+	ExJSONVal()                    { d = std::make_shared<ExJSONData>();                     }
+	ExJSONVal(ExJSONValType t)     { d = std::make_shared<ExJSONData>(); d->alloc(t);        }
+	ExJSONVal(const ExJSONVal &t)  { exjson_debug("Clone pointer (constructor)\n"); d = t.d; }
+	ExJSONVal(int v)               { d = std::make_shared<ExJSONData>(); d->setInt((long)v); }
+	ExJSONVal(long v)              { d = std::make_shared<ExJSONData>(); d->setInt(v);       }
+	ExJSONVal(bool v)              { d = std::make_shared<ExJSONData>(); d->setBool(v);      }
+	ExJSONVal(double v)            { d = std::make_shared<ExJSONData>(); d->setDouble(v);    }
+	ExJSONVal(std::string &s)      { d = std::make_shared<ExJSONData>(); d->setString(s);    }
+	ExJSONVal(ExJSONValVec &s)     { d = std::make_shared<ExJSONData>(); d->setArray(s);     }
+	ExJSONVal(ExJSONValMap &s)     { d = std::make_shared<ExJSONData>(); d->setObject(s);    }
+	ExJSONVal(const char *s, int len = -1) {
 		d = std::make_shared<ExJSONData>();
-		d->setString(v, len);
+		d->setCString(s, len);
 	}
-	ExJSONVal(std::string &s) { ExJSONVal(s.c_str(), s.length()); }
-	ExJSONVal(ExJSONValVec &s) {d = std::make_shared<ExJSONData>(); d->setArray(s); }
-	ExJSONVal(ExJSONValMap &s) {d = std::make_shared<ExJSONData>(); d->setObject(s); }
 	ExJSONVal(std::initializer_list<ExJSONVal> l) {
 		d = std::make_shared<ExJSONData>();
 		auto i = l.begin();
@@ -228,39 +229,26 @@ public:
 		/* Detect object or array */
 		if (checkForObject(l)) {
 			d->alloc(ExJSONValObject);
-			ExJSONValMap *v = (ExJSONValMap *)d->m_value;
+			ExJSONValMap *v = d->m_u.m;
 			while (i != l.end()) {
-				const char *key = i->getCString(); i++;
+				std::string key = i->getString(); i++;
 				(*v)[key] = ExJSONVal((*i++));
 			}
 		} else {
 			d->alloc(ExJSONValArray);
-			ExJSONValVec *v = (ExJSONValVec *)d->m_value;
+			ExJSONValVec *v = d->m_u.v;
 			while (i != l.end()) {
 				v->push_back(ExJSONVal((*i++)));
-				exjson_debug("push val\n");
 			}
 		}
 	}
+	/* Copy operator  */
+	ExJSONVal &operator = ( const ExJSONVal &t ) { d = t.d; return *this; }
 
 	/*!
 	 * \brief Destructor.
 	 */
 	~ExJSONVal() { }
-
-	ExJSONVal &operator = ( const ExJSONVal &t ) {
-		exjson_debug("Clear and copy\n");
-		_detach();
-		d->clear();
-		d->copy(t.d);
-		return *this;
-	}
-
-	ExJSONVal &operator = ( ExJSONVal &t ) {
-		exjson_debug("Clone pointer (= operator)\n");
-		d = t.d;
-		return *this;
-	}
 
 	//Detach this string from the original and create a buffer for its own.
 	void _detach(bool copy = false) {
@@ -281,11 +269,18 @@ public:
 	 * \brief getType - get JSON variant type.
 	 */
 	ExJSONValType getType() const { return d->m_type; }
-	bool is_null() { return (d->m_type == ExJSONValNull); }
+	bool is_null() const   { return (d->m_type == ExJSONValNull);   }
+	bool is_double() const { return (d->m_type == ExJSONValDouble); }
+	bool is_bool() const   { return (d->m_type == ExJSONValBool);   }
+	bool is_int() const    { return (d->m_type == ExJSONValInt);    }
+	bool is_string() const { return (d->m_type == ExJSONValString); }
+	bool is_object() const { return (d->m_type == ExJSONValObject); }
+	bool is_array() const  { return (d->m_type == ExJSONValArray);  }
 
 	/* ============--- Integer ---============== */
-	ExJSONVal &operator = ( const int &i ) { _detach(); d->setInt(i); return *this; }
-	int getInt() const { return d->getInt(); }
+	ExJSONVal &operator = ( const long &i ) { _detach(); d->setInt(i); return *this; }
+	ExJSONVal &operator = ( const int &i ) { _detach(); d->setInt((long)i); return *this; }
+	long getInt() const { return d->getInt(); }
 
 	/* ============--- Bool ---============== */
 	ExJSONVal &operator = ( const bool &i ) { _detach(); d->setBool(i); return *this; }
@@ -298,22 +293,22 @@ public:
 
 	/* ============--- string ---============== */
 	ExJSONVal &operator = ( const char *i ) { _detach(); d->setString(i); return *this; }
-	ExJSONVal &operator = ( const std::string &s ) { _detach(); d->setString(s.c_str(), s.length()); return *this; }
-	const char *getCString() const {
-		if (d->m_type == ExJSONValString) return (const char *)d->m_value; /* Get native value */
-		return 0;
-	}
+	ExJSONVal &operator = ( const std::string &s ) { _detach(); d->setString(s); return *this; }
 	std::string getString() const {
-		if (d->m_type == ExJSONValString)
-			return std::string((const char *)d->m_value, d->m_len-1);                             /* Get native value.          */
-		else if (d->m_type == ExJSONValDouble) return std::to_string(*((double*)d->m_value));     /* Convert double to string.  */
-		else if (d->m_type == ExJSONValInt) return std::to_string(d->m_len);                      /* Convert int to string.     */
-		else if (d->m_type == ExJSONValBool) return std::string(((bool)d->m_len)?"true":"false"); /* Convert bool to string.    */
+		if (d->m_type == ExJSONValString) return *(d->m_u.s);                                     /* Get native value.          */
+		else if (d->m_type == ExJSONValDouble) return std::to_string(d->m_u.d);                   /* Convert double to string.  */
+		else if (d->m_type == ExJSONValInt) return std::to_string(d->m_u.i);                      /* Convert int to string.     */
+		else if (d->m_type == ExJSONValBool) return std::string((d->m_u.b)?"true":"false");       /* Convert bool to string.    */
 		else if ((d->m_type == ExJSONValArray) || (d->m_type == ExJSONValObject)) return dump();  /* Dump to json string.       */
 		return std::string();
 	}
 
 	/* ============--- Array ---============== */
+	void push_back(long v) {
+		ExJSONVal x(v);
+		push_back(x);
+		exjson_debug("Array push_back int %d\n", v);
+	}
 	void push_back(int v) {
 		ExJSONVal x(v);
 		push_back(x);
@@ -327,26 +322,26 @@ public:
 	void push_back(const char *v) {
 		ExJSONVal x(v);
 		push_back(x);
-		exjson_debug("Array push_back c string %d, %s\n", d->m_value, v);
+		exjson_debug("Array push_back c string %d, %s\n", d, v);
 	}
 	void push_back(std::string &v) {
 		ExJSONVal x(v);
 		push_back(x);
-		exjson_debug("Array push_back string %d %s\n", d->m_value, v.c_str());
+		exjson_debug("Array push_back string %d %s\n", d, v.c_str());
 	}
 	void push_back(ExJSONVal &p) {
 		_detach();
 		d->alloc(ExJSONValArray);
-		ExJSONValVec *v = (ExJSONValVec *)d->m_value;
+		ExJSONValVec *v = d->m_u.v;
 		v->push_back(std::move(p));
 	}
 	ExJSONVal& operator[](int i) {
 		_detach();
 		d->alloc(ExJSONValArray);
-		ExJSONValVec *v = (ExJSONValVec *)d->m_value;
+		ExJSONValVec *v =  d->m_u.v;
 		/* Resize vector if needed */
 		while (((int)v->size()) < (i + 1)) v->push_back(ExJSONVal());
-		exjson_debug("Array set %d, idx = %d\n", d->m_value, i);
+		exjson_debug("Array set %d, idx = %d\n", d, i);
 		return ((*v)[i]);
 	}
 
@@ -366,7 +361,7 @@ public:
 	ExJSONVal& operator[](const char *i) {
 		_detach();
 		d->alloc(ExJSONValObject);
-		ExJSONValMap *v = (ExJSONValMap *)d->m_value;
+		ExJSONValMap *v =  d->m_u.m;
 		auto x = v->find(i);
 		if (x == v->end()) {
 			v->insert({i, ExJSONVal()});
@@ -377,7 +372,7 @@ public:
 	void setKey(std::string i, ExJSONVal y) {
 		_detach();
 		d->alloc(ExJSONValObject);
-		ExJSONValMap *v = (ExJSONValMap *)d->m_value;
+		ExJSONValMap *v = d->m_u.m;
 		auto x = v->find(i);
 		if (x == v->end()) {
 			v->insert({i, y});
@@ -389,11 +384,7 @@ public:
 
 	/* --- Parser (based on https://github.com/nbsdx/SimpleJSON/blob/master/json.hpp ) --- */
 
-
-
 	static inline void consume_ws(const char *&str) { while( isspace( *str ) ) ++str; }
-
-
 
 	static ExJSONVal parse_object(const char *&str) {
 		ExJSONVal obj( ExJSONValObject );
@@ -496,9 +487,9 @@ public:
 			n = std::stod( val ) * std::pow( 10, exp );
 		else {
 			if( !exp_str.empty() )
-				n = std::stoi( val ) * std::pow( 10, exp );
+				n = std::stol( val ) * std::pow( 10, exp );
 			else
-				n = std::stoi( val );
+				n = std::stol( val );
 		}
 		return n;
 	}
@@ -567,13 +558,13 @@ private:
 	void dumpInt(std::string &s) const {
 		switch(d->m_type) {
 			case ExJSONValNull:   s.append("null"); break;
-			case ExJSONValInt:    s.append(std::to_string(d->m_len)); break;
-			case ExJSONValBool:   s.append(((bool)d->m_len)?"true":"false"); break;
-			case ExJSONValDouble: s.append(std::to_string(*((double *)d->m_value))); break;
+			case ExJSONValInt:    s.append(std::to_string(d->m_u.i)); break;
+			case ExJSONValBool:   s.append((d->m_u.b)?"true":"false"); break;
+			case ExJSONValDouble: s.append(std::to_string(d->m_u.d)); break;
 			case ExJSONValString: s.append("\"").append(getString()).append("\""); break;
 			case ExJSONValArray: {
 				s.append("[");
-				ExJSONValVec *v = (ExJSONValVec *)d->m_value;
+				ExJSONValVec *v = d->m_u.v;
 				for (const auto &i: *v) {
 					i.dumpInt(s);
 					s.append(",");
@@ -583,7 +574,7 @@ private:
 			} break;
 			case ExJSONValObject: {
 				s.append("{");
-				ExJSONValMap *v = (ExJSONValMap *)d->m_value;
+				ExJSONValMap *v = d->m_u.m;
 				for (const auto &i: *v) {
 					s.append("\"").append(i.first).append("\":");
 					i.second.dumpInt(s);
