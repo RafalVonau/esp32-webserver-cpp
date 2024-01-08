@@ -153,18 +153,23 @@ static esp_err_t express_put_handler(httpd_req_t* req)
 
 static esp_err_t express_ws_handler(httpd_req_t* req)
 {
-    Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
-    WSRequest r(req, e);
-    esp_err_t ret;
-
-    ret = httpd_ws_recv_frame(req, &r.m_pkt, WS_MAX_FRAME_SIZE);
-    if (ret != ESP_OK) {
-        msg_error("httpd_ws_recv_frame failed with %d", ret);
-        return ret;
+    if (req->method == HTTP_GET) {
+        // ESP_LOGI(TAG, "Handshake done, the new connection was opened");
+        return ESP_OK;
     } else {
-        return e->doWS(&r);
+        Express* e = (Express*)httpd_get_global_user_ctx(req->handle);
+        WSRequest r(req, e);
+        esp_err_t ret;
+
+        ret = httpd_ws_recv_frame(req, &r.m_pkt, WS_MAX_FRAME_SIZE);
+        if (ret != ESP_OK) {
+            msg_error("httpd_ws_recv_frame failed with %d", ret);
+            return ret;
+        } else {
+            return e->doWS(&r);
+        }
+        return ret;
     }
-    return ret;
 }
 
 /*!
