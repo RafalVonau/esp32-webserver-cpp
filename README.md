@@ -1,7 +1,7 @@
 # Simple WebServer for esp-idf
 This project implements basic Web server protocol for esp-idf version 4 and above.
 
-![](https://raw.githubusercontent.com/BubuHub/esp32-webserver-cpp/997cd07ba4c3fa29c57117d3e8e50408098541ac/blob/assets/firmware.png?raw=true)
+![](https://raw.githubusercontent.com/RafalVonau/esp32-webserver-cpp/997cd07ba4c3fa29c57117d3e8e50408098541ac/blob/assets/firmware.png?raw=true)
 
 The functionality of the server is inspired by [express.js](https://expressjs.com/) from [nodejs](https://nodejs.org/).
 
