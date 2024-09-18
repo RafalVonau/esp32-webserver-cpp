@@ -370,6 +370,10 @@ public:
             this->m_on.erase(what);
         }}); 
     }
+    void ws_send_to_all_clients(const char* buf);
+    int ws_connected_clients_count();
+
+    void setOnMissing(ExpressMidCB m) {m_onMissing = m;}
 
     std::string generateUUID();
     ExpressMidCB getJsonMW();
@@ -416,6 +420,7 @@ public:
     httpd_handle_t         m_server;
     httpd_config_t         m_config;
     ExpressWSCB            m_wsCB;
+    ExpressMidCB           m_onMissing;
     /* Wrap handlers */
     httpd_uri_t            m_h_get, m_h_post, m_h_ws, m_h_delete, m_h_patch, m_h_put;
     /* OTA */

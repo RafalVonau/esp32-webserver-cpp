@@ -207,11 +207,12 @@ public:
 	ExJSONVal()                    { d = std::make_shared<ExJSONData>();                     }
 	ExJSONVal(ExJSONValType t)     { d = std::make_shared<ExJSONData>(); d->alloc(t);        }
 	ExJSONVal(const ExJSONVal &t)  { exjson_debug("Clone pointer (constructor)\n"); d = t.d; }
+	ExJSONVal(unsigned int v)      { d = std::make_shared<ExJSONData>(); d->setInt((long)v); }
 	ExJSONVal(int v)               { d = std::make_shared<ExJSONData>(); d->setInt((long)v); }
 	ExJSONVal(long v)              { d = std::make_shared<ExJSONData>(); d->setInt(v);       }
 	ExJSONVal(bool v)              { d = std::make_shared<ExJSONData>(); d->setBool(v);      }
 	ExJSONVal(double v)            { d = std::make_shared<ExJSONData>(); d->setDouble(v);    }
-	ExJSONVal(std::string &s)      { d = std::make_shared<ExJSONData>(); d->setString(s);    }
+	ExJSONVal(const std::string &s){ d = std::make_shared<ExJSONData>(); d->setString(s);    }
 	ExJSONVal(ExJSONValVec &s)     { d = std::make_shared<ExJSONData>(); d->setArray(s);     }
 	ExJSONVal(ExJSONValMap &s)     { d = std::make_shared<ExJSONData>(); d->setObject(s);    }
 	ExJSONVal(const char *s, int len = -1) {
@@ -280,16 +281,19 @@ public:
 	/* ============--- Integer ---============== */
 	ExJSONVal &operator = ( const long &i ) { _detach(); d->setInt(i); return *this; }
 	ExJSONVal &operator = ( const int &i ) { _detach(); d->setInt((long)i); return *this; }
+	ExJSONVal &operator = ( const unsigned int &i ) { _detach(); d->setInt((long)i); return *this; }
 	long getInt() const { return d->getInt(); }
+	long to_int() const { return d->getInt(); }
 
 	/* ============--- Bool ---============== */
 	ExJSONVal &operator = ( const bool &i ) { _detach(); d->setBool(i); return *this; }
 	bool getBool() const { return d->getBool(); }
-
+	bool to_bool() const { return d->getBool(); }
 
 	/* ============--- double ---============== */
 	ExJSONVal &operator = ( const double &i ) { _detach(); d->setDouble(i); return *this; }
 	double getDouble() const { return d->getDouble(); }
+	double to_double() const { return d->getDouble(); }
 
 	/* ============--- string ---============== */
 	ExJSONVal &operator = ( const char *i ) { _detach(); d->setString(i); return *this; }
@@ -302,6 +306,7 @@ public:
 		else if ((d->m_type == ExJSONValArray) || (d->m_type == ExJSONValObject)) return dump();  /* Dump to json string.       */
 		return std::string();
 	}
+	std::string to_string() const { return getString(); }
 
 	/* ============--- Array ---============== */
 	void push_back(long v) {
@@ -324,24 +329,46 @@ public:
 		push_back(x);
 		exjson_debug("Array push_back c string %d, %s\n", d, v);
 	}
-	void push_back(std::string &v) {
+	void push_back(const std::string &v) {
 		ExJSONVal x(v);
 		push_back(x);
 		exjson_debug("Array push_back string %d %s\n", d, v.c_str());
 	}
-	void push_back(ExJSONVal &p) {
-		_detach();
+	void push_back(ExJSONVal p) {
+		_detach(true);
 		d->alloc(ExJSONValArray);
 		ExJSONValVec *v = d->m_u.v;
 		v->push_back(std::move(p));
 	}
 	ExJSONVal& operator[](int i) {
-		_detach();
+		_detach(true);
 		d->alloc(ExJSONValArray);
 		ExJSONValVec *v =  d->m_u.v;
 		/* Resize vector if needed */
 		while (((int)v->size()) < (i + 1)) v->push_back(ExJSONVal());
 		exjson_debug("Array set %d, idx = %d\n", d, i);
+		return ((*v)[i]);
+	}
+	ExJSONValVec getList() const {
+		if (d->m_type == ExJSONValArray) return *d->m_u.v;
+		return ExJSONValVec();
+	}
+	ExJSONValVec to_list() const { return getList(); }
+
+	ExJSONValVec *getListPtr() {
+		if (d->m_type == ExJSONValArray) return d->m_u.v;
+		return NULL;
+	}
+//	ExJSONValVec& getListRef() {
+//		if (d->m_type == ExJSONValArray) return (*d->m_u.v);
+//		_detach(true);
+//		d->alloc(ExJSONValArray);
+//		return (*d->m_u.v);
+//	}
+
+	ExJSONVal at(int i) {
+		if (d->m_type != ExJSONValArray) return ExJSONVal();
+		ExJSONValVec *v =  d->m_u.v;
 		return ((*v)[i]);
 	}
 
@@ -359,18 +386,19 @@ public:
 	}
 
 	ExJSONVal& operator[](const char *i) {
-		_detach();
+		_detach(true);
 		d->alloc(ExJSONValObject);
 		ExJSONValMap *v =  d->m_u.m;
 		auto x = v->find(i);
 		if (x == v->end()) {
+			// printf("Not found %s\n", i);
 			v->insert({i, ExJSONVal()});
 			x = v->find(i);
 		}
 		return (x->second);
 	}
 	void setKey(std::string i, ExJSONVal y) {
-		_detach();
+		_detach(true);
 		d->alloc(ExJSONValObject);
 		ExJSONValMap *v = d->m_u.m;
 		auto x = v->find(i);
@@ -379,7 +407,40 @@ public:
 		}
 	}
 
+	ExJSONVal getKey(std::string s) {
+		if (d->m_type == ExJSONValObject) {
+			ExJSONValMap *v =  d->m_u.m;
+			auto x = v->find(s);
+			if (x == v->end()) {
+				return ExJSONVal();
+			}
+			return (x->second);
+		}
+		return ExJSONVal();
+	}
+
+	bool contains(std::string s) {
+		if (d->m_type == ExJSONValObject) {
+			ExJSONValMap *v =  d->m_u.m;
+			auto x = v->find(s);
+			if (x == v->end()) {
+				return false;
+			}
+			return true;
+		} else if (d->m_type == ExJSONValArray) {
+		}
+		return false;
+	}
+
 	std::string dump() const{ std::string res; res.reserve(128); dumpInt(res); return res; }
+
+	/* Simplified operators */
+	bool operator == (const ExJSONVal& b) const {
+//		if ((d->m_type == ExJSONValArray) && (b.getType() == ExJSONValArray)) {
+//			/* Smart compare ? */
+//		}
+		return (getString() == b.getString());
+	}
 
 
 	/* --- Parser (based on https://github.com/nbsdx/SimpleJSON/blob/master/json.hpp ) --- */
@@ -413,7 +474,7 @@ public:
 				break;
 			}
 		}
-		return std::move( obj );
+		return obj;
 	}
 
 	static ExJSONVal parse_array(const char *&str) {
@@ -522,18 +583,19 @@ public:
 		consume_ws(str);
 		value = *str;
 		switch( value ) {
-			case '[' : return std::move( parse_array(str) );
-			case '{' : return std::move( parse_object(str) );
-			case '\"': return std::move( parse_string(str) );
+			case '[' : return parse_array(str);
+			case '{' : return parse_object(str);
+			case '\"': return parse_string(str);
 			case 't' :
-			case 'f' : return std::move( parse_bool(str) );
-			case 'n' : return std::move( parse_null(str) );
+			case 'f' : return parse_bool(str);
+			case 'n' : return parse_null(str);
 			default  : if( ( value <= '9' && value >= '0' ) || value == '-' )
-					return std::move( parse_number(str) );
+					return parse_number(str);
 		}
 		return 	ExJSONVal();
 	}
 
+	static ExJSONVal parse(const std::string s) { return parse(s.c_str()); }
 	static ExJSONVal parse(const char *str) { return parse_next(str); }
 
 	/*!
@@ -569,7 +631,7 @@ private:
 					i.dumpInt(s);
 					s.append(",");
 				}
-				if (s.size() > 1) s.resize(s.size() - 1);
+				if (v->size() > 0) s.resize(s.size() - 1);
 				s.append("]");
 			} break;
 			case ExJSONValObject: {
@@ -580,7 +642,7 @@ private:
 					i.second.dumpInt(s);
 					s.append(",");
 				}
-				if (s.size() > 1) s.resize(s.size() - 1);
+				if (v->size() > 0) s.resize(s.size() - 1);
 				s.append("}");
 			} break;
 			default: break;

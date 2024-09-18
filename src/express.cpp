@@ -166,6 +166,7 @@ static esp_err_t express_ws_handler(httpd_req_t* req)
             msg_error("httpd_ws_recv_frame failed with %d", ret);
             return ret;
         } else {
+            // msg_info("Got frame (final = %d, fragmented=%d)", r.m_pkt.final?1:0, r.m_pkt.fragmented?1:0);
             return e->doWS(&r);
         }
         return ret;
@@ -231,6 +232,7 @@ Express::Express()
     m_h_put.method = HTTP_PUT;
 
     m_wsCB = NULL;
+    m_onMissing = NULL;
 
     /* Generic API */
     get("api/mem", [](ExRequest* req) {
@@ -261,6 +263,7 @@ Express::Express()
         }
     });
 #endif
+#ifndef NO_EXPRESS_TASKLIST
     get("api/tasks", [](ExRequest* req) {
         std::string ret;
         const size_t bytes_per_task = 40; /* see vTaskList description */
@@ -279,7 +282,7 @@ Express::Express()
         free(task_list_buffer);
         req->txt((const char*)ret.c_str(), ret.length());
     });
-
+#endif    
     /* OTA */
     post("ota", [](ExRequest* req) { req->m_e->ota_post_handler(req->m_req); });
 }
@@ -376,7 +379,6 @@ void Express::start(int port, uint8_t pr, BaseType_t coreID)
 
 const static char http_404_hdr[] = "404 Not Found";
 const static char http_401_hdr[] = "401 Unauthorized";
-
 /*!
  * \brief Handle GET (HTML/CSS/JS/JSON code).
  */
@@ -436,7 +438,12 @@ esp_err_t Express::doRQ(httpd_req_t* req, ExpressPgMap* m, ExpressPgList *l)
             i++;
         }
     }
-
+    if (m_onMissing) {
+        if (m_onMissing(&rq)) {
+            do_pm_unlock();
+            return ret;            
+        }
+    }
     /* Not found */
     httpd_resp_set_status(req, http_404_hdr);
     ret = httpd_resp_send(req, NULL, 0);
@@ -485,8 +492,8 @@ esp_err_t Express::doWS(WSRequest* rq)
             char* dt = pl + 4;
             ret = ota_stop(2); /* Abort any pending OTA update */
             if (ret == ESP_OK) {
-                if (sscanf(dt, "%u %u", &__ota_id, &__ota_size) == 2) {
-                    msg_ota("ota request id = %d, size = %d",__ota_id, __ota_size);
+                if (sscanf(dt, "%u %u", (unsigned int *)&__ota_id, (unsigned int *)&__ota_size) == 2) {
+                    msg_ota("ota request id = %u, size = %u",(unsigned int)__ota_id, (unsigned int)__ota_size);
                     __ota_start_timestamp = esp_timer_get_time();
                     __ota_update_partition = esp_ota_get_next_update_partition(NULL);
                     __ota_cnt = 0;
@@ -553,7 +560,7 @@ esp_err_t Express::doWS(WSRequest* rq)
                     }
                 }
             } else {
-                msg_error("Bad OTA id (%u != %u)", *v, __ota_id);
+                msg_error("Bad OTA id (%u != %u)", (unsigned int)*v, (unsigned int)__ota_id);
             }
         } else {
             /* Handle WebSocket binary data frame */
@@ -565,6 +572,22 @@ esp_err_t Express::doWS(WSRequest* rq)
 
     return ret;
 }
+
+int Express::ws_connected_clients_count()
+{
+    static size_t max_clients = CONFIG_LWIP_MAX_LISTENING_TCP;
+    size_t fds = max_clients;
+    int client_fds[CONFIG_LWIP_MAX_LISTENING_TCP] = { 0 };
+    esp_err_t ret = httpd_get_client_list(m_server, &fds, client_fds);
+    int res = 0;
+    if (ret != ESP_OK) return 0;
+    for (int i = 0; i < fds; i++) {
+        httpd_ws_client_info_t client_info = httpd_ws_get_fd_info(m_server, client_fds[i]);
+        if (client_info == HTTPD_WS_CLIENT_WEBSOCKET) { res++; }
+    }
+    return res;
+}
+/* ========================================================================================== */
 
 
 //===========================================================================
@@ -600,7 +623,7 @@ esp_err_t Express::ota_stop(uint32_t abort)
             return esp_ota_abort(__ota_update_handle);
         } else {
             msg_ota("Time taken to download firmware: %0.3f s", (float)(esp_timer_get_time() - __ota_start_timestamp) / 1000000L);
-            msg_ota("Firmware size: %uKB", __ota_size / 1024);
+            msg_ota("Firmware size: %uKB", (unsigned int )(__ota_size / 1024));
             ret = esp_ota_end(__ota_update_handle);
             if (ret == ESP_OK) {
                 ret = esp_ota_set_boot_partition(__ota_update_partition);
@@ -1128,8 +1151,10 @@ esp_err_t WSRequest::res_val(const char* fn, esp_err_t ret, uint32_t val)
 {
     httpd_ws_frame_t pkt;
 
-    pkt.len = snprintf((char*)m_buf, (WS_MAX_FRAME_SIZE - 1), "{ \"cmd\": \"%s\", \"ret\": %d, \"val\": %u }", fn, ret, val);
+    pkt.len = snprintf((char*)m_buf, (WS_MAX_FRAME_SIZE - 1), "{ \"cmd\": \"%s\", \"ret\": %d, \"val\": %u }", fn, ret, (unsigned int)val);
     pkt.payload = (uint8_t*)m_buf;
+    pkt.final = true;
+    pkt.fragmented = false;
     pkt.type = HTTPD_WS_TYPE_TEXT;
     return httpd_ws_send_frame(m_req, &pkt);
 }
@@ -1144,6 +1169,8 @@ esp_err_t WSRequest::send(const char *s, int len)
     if (len == 0) len = strlen(s);
     pkt.payload = (uint8_t*)s;
     pkt.type = HTTPD_WS_TYPE_TEXT;
+    pkt.final = true;
+    pkt.fragmented = false;
     pkt.len = len;
     return httpd_ws_send_frame(m_req, &pkt);
 }
@@ -1169,6 +1196,8 @@ static void httpd_ws_send_data_to_all_clients_int(void* arg)
     memset(&ws_pkt, 0, sizeof(httpd_ws_frame_t));
     ws_pkt.payload = (uint8_t*)pr->buf;
     ws_pkt.len = pr->len;
+    ws_pkt.final = true;
+    ws_pkt.fragmented = false;
     ws_pkt.type = HTTPD_WS_TYPE_TEXT;
 
     for (int i = 0; i < fds; i++) {
@@ -1183,6 +1212,7 @@ static void httpd_ws_send_data_to_all_clients_int(void* arg)
     ::free((void*)pr);
 }
 /* ========================================================================================== */
+
 
 void WSRequest::send_to_all_clients(const char* buf)
 {
@@ -1217,3 +1247,15 @@ void WSRequest::send_to_all_clients(const char* buf)
 //     }
 // }
 // /* ========================================================================================== */
+
+void Express::ws_send_to_all_clients(const char* buf)
+{
+    int len = strlen(buf);
+    struct https_async_params* pr = (struct https_async_params*)malloc(sizeof(struct https_async_params) + len + 1);
+    if (pr) {
+        pr->m_server = m_server;
+        pr->len = len;
+        strcpy(pr->buf, buf);
+        httpd_queue_work(m_server, httpd_ws_send_data_to_all_clients_int, pr);
+    }
+}
